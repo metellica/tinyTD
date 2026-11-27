@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: ''
+          - os: macos-latest
+            args: '--target universal-apple-darwin'
+          - os: ubuntu-22.04
+            args: ''
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2" --locked
+      # 仓库只提交了 png/ico，这里补生成 macOS 打包需要的 icon.icns
+      - name: Generate icons
+        run: cargo tauri icon src-tauri/icons/icon.png
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: cargo tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: 'tinyTD ${{ github.ref_name }}'
+          releaseBody: '下载对应平台的安装包：Windows `.exe`、macOS `.dmg`、Linux `.deb` / `.AppImage`。'
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
