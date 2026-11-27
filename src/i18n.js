@@ -1,0 +1,148 @@
+// tinyTD 界面文案（中 / 英）
+const I18N = {
+  zh: {
+    tabTodo: '待办',
+    tabDone: '已完成',
+    clear: '清空',
+    clearConfirm: '确认清空?',
+    clearTitle: '清空已完成列表',
+    addPlaceholder: '添加待办，回车确认',
+    openDirTitle: '打开数据文件夹',
+    dataFile: '数据文件',
+    stats: (a, b) => `${a} 项待办 · ${b} 项已完成`,
+    today: '今天',
+    yesterday: '昨天',
+    completedAt: '完成于',
+    createdAt: '建于',
+    modifiedAt: '改于',
+    del: '删除',
+    confirm: '确认?',
+    dragTitle: '拖动调整顺序',
+    markDone: '标记完成',
+    clickEdit: '点击编辑',
+    restoreTitle: '恢复为待办',
+    restored: '已恢复为待办',
+    deleted: '已删除',
+    clearedDone: '已清空完成列表',
+    emptyTodo: '没有待办，休息一下吧',
+    emptyDone: '还没有已完成任务',
+    openInApp: '请在 tinyTD 桌面应用中打开',
+    settings: '设置',
+    close: '关闭',
+    groupGeneral: '通用',
+    groupAppearance: '外观',
+    groupText: '文字',
+    setClose: '点击窗口关闭按钮时',
+    setHotkey: '全局热键',
+    hotkeyPress: '请按下新的热键…',
+    hotkeyReset: '恢复默认 (Ctrl+K)',
+    hotkeyNeedMod: '热键需要包含 Ctrl / Alt / Shift / Cmd',
+    closeMinimize: '最小化',
+    closeMinimizeDesc: '窗口收起到任务栏',
+    closeTray: '隐藏到托盘',
+    closeTrayDesc: '任务栏不保留，从托盘图标唤起',
+    closeExit: '退出程序',
+    closeExitDesc: '完全关闭 tinyTD',
+    themeAuto: '跟随系统',
+    themeLight: '浅色',
+    themeDark: '深色',
+    setLang: '界面语言',
+    setFont: '字体',
+    fontDefault: '默认',
+    fontCustom: '自定义…',
+    setFontCustom: '自定义字体名',
+    fontCustomHint: '输入系统已安装的字体名',
+    setFontSize: '字号',
+    previewLabel: '预览',
+    preview: '写周报 · The quick brown fox 0123',
+    previewMeta: '建于 今天 09:30',
+  },
+  en: {
+    tabTodo: 'To do',
+    tabDone: 'Done',
+    clear: 'Clear',
+    clearConfirm: 'Confirm?',
+    clearTitle: 'Clear completed tasks',
+    addPlaceholder: 'Add a task, press Enter',
+    openDirTitle: 'Open data folder',
+    dataFile: 'Data files',
+    stats: (a, b) => `${a} to do · ${b} done`,
+    today: 'Today',
+    yesterday: 'Yesterday',
+    completedAt: 'Done',
+    createdAt: 'Created',
+    modifiedAt: 'Edited',
+    del: 'Delete',
+    confirm: 'Sure?',
+    dragTitle: 'Drag to reorder',
+    markDone: 'Mark as done',
+    clickEdit: 'Click to edit',
+    restoreTitle: 'Restore to to-do',
+    restored: 'Restored to to-do',
+    deleted: 'Deleted',
+    clearedDone: 'Completed list cleared',
+    emptyTodo: 'Nothing to do. Take a break!',
+    emptyDone: 'No completed tasks yet',
+    openInApp: 'Please open in the tinyTD desktop app',
+    settings: 'Settings',
+    close: 'Close',
+    groupGeneral: 'General',
+    groupAppearance: 'Appearance',
+    groupText: 'Text',
+    setClose: 'When closing the window',
+    setHotkey: 'Global hotkey',
+    hotkeyPress: 'Press new shortcut…',
+    hotkeyReset: 'Reset to default (Ctrl+K)',
+    hotkeyNeedMod: 'Shortcut needs Ctrl / Alt / Shift / Cmd',
+    closeMinimize: 'Minimize',
+    closeMinimizeDesc: 'Keep it in the taskbar',
+    closeTray: 'Hide to tray',
+    closeTrayDesc: 'Leave the taskbar, reopen from tray',
+    closeExit: 'Quit',
+    closeExitDesc: 'Fully close tinyTD',
+    themeAuto: 'System',
+    themeLight: 'Light',
+    themeDark: 'Dark',
+    setLang: 'Language',
+    setFont: 'Font',
+    fontDefault: 'Default',
+    fontCustom: 'Custom…',
+    setFontCustom: 'Custom font name',
+    fontCustomHint: 'Name of an installed font',
+    setFontSize: 'Font size',
+    previewLabel: 'Preview',
+    preview: '写周报 · The quick brown fox 0123',
+    previewMeta: 'Created Today 09:30',
+  },
+};
+
+// 后端返回的中文错误 -> 英文
+const ERR_EN = {
+  '内容不能为空': 'Text cannot be empty',
+  '任务不存在，可能刚被修改，请刷新后重试': 'Task not found; it may have just changed. Please retry',
+  '位置无效': 'Invalid position',
+  '内部锁异常': 'Internal lock error',
+  '热键必须包含 Ctrl / Alt / Shift / Cmd 中的至少一个': 'Shortcut needs Ctrl / Alt / Shift / Cmd',
+};
+
+let currentLang = 'zh';
+
+function tr(key, ...args) {
+  const v = I18N[currentLang][key] ?? I18N.zh[key] ?? key;
+  return typeof v === 'function' ? v(...args) : v;
+}
+
+function tErr(e) {
+  const msg = String(e);
+  return currentLang === 'en' ? ERR_EN[msg] ?? msg : msg;
+}
+
+function setLang(lang) {
+  currentLang = I18N[lang] ? lang : 'zh';
+  document.documentElement.lang = currentLang === 'en' ? 'en' : 'zh-CN';
+  document.querySelectorAll('[data-i18n]').forEach((n) => (n.textContent = tr(n.dataset.i18n)));
+  document.querySelectorAll('[data-i18n-title]').forEach((n) => (n.title = tr(n.dataset.i18nTitle)));
+  document
+    .querySelectorAll('[data-i18n-placeholder]')
+    .forEach((n) => (n.placeholder = tr(n.dataset.i18nPlaceholder)));
+}

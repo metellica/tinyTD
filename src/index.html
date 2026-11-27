@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>tinyTD</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="tabs" role="tablist">
+        <button id="tab-todo" class="tab active" role="tab"><span data-i18n="tabTodo"></span><span id="count-todo" class="count">0</span></button>
+        <button id="tab-done" class="tab" role="tab"><span data-i18n="tabDone"></span><span id="count-done" class="count">0</span></button>
+      </div>
+      <button id="btn-clear" class="icon-btn" data-i18n-title="clearTitle" hidden></button>
+      <button id="btn-settings" class="icon-btn" data-i18n-title="settings">
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </header>
+
+    <div class="add-row">
+      <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      <input id="input-add" data-i18n-placeholder="addPlaceholder" autocomplete="off" spellcheck="false" maxlength="300" />
+    </div>
+
+    <main id="list" tabindex="0"></main>
+
+    <footer>
+      <span id="stats"></span>
+      <button id="btn-dir" class="icon-btn" data-i18n-title="openDirTitle"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/></svg><span data-i18n="dataFile"></span></button>
+    </footer>
+  </div>
+
+  <div id="settings" class="sheet" role="dialog" aria-modal="true" hidden>
+    <div class="sheet-head">
+      <button id="btn-settings-close" class="icon-btn back" data-i18n-title="close">
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <h2 data-i18n="settings"></h2>
+    </div>
+
+    <div class="sheet-body">
+      <section class="group">
+        <h3 class="group-title" data-i18n="groupGeneral"></h3>
+        <div class="card">
+          <div class="card-cap" data-i18n="setClose"></div>
+          <div id="set-close" class="options" role="radiogroup">
+            <label class="option">
+              <input type="radio" name="close" value="minimize" />
+              <span class="opt-ico"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M8 15.5h8"/></svg></span>
+              <span class="opt-text"><span class="opt-title" data-i18n="closeMinimize"></span><span class="opt-desc" data-i18n="closeMinimizeDesc"></span></span>
+              <span class="radio"></span>
+            </label>
+            <label class="option">
+              <input type="radio" name="close" value="tray" />
+              <span class="opt-ico"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v10M8 9.5l4 4 4-4"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/></svg></span>
+              <span class="opt-text"><span class="opt-title" data-i18n="closeTray"></span><span class="opt-desc" data-i18n="closeTrayDesc"></span></span>
+              <span class="radio"></span>
+            </label>
+            <label class="option">
+              <input type="radio" name="close" value="exit" />
+              <span class="opt-ico"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v8"/><path d="M6.4 7a8 8 0 1 0 11.2 0"/></svg></span>
+              <span class="opt-text"><span class="opt-title" data-i18n="closeExit"></span><span class="opt-desc" data-i18n="closeExitDesc"></span></span>
+              <span class="radio"></span>
+            </label>
+          </div>
+          <div class="line">
+            <span class="line-label" data-i18n="setHotkey"></span>
+            <div class="hotkey-ctl">
+              <button id="set-hotkey" class="ctl hotkey" type="button"></button>
+              <button id="btn-hotkey-reset" class="icon-btn" type="button" data-i18n-title="hotkeyReset">
+                <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h3 class="group-title" data-i18n="groupAppearance"></h3>
+        <div class="card">
+          <div id="set-theme" class="tiles" role="radiogroup">
+            <label class="tile">
+              <input type="radio" name="theme" value="auto" />
+              <span class="mock mock-auto"><i></i><i></i><i></i></span>
+              <span class="tile-label" data-i18n="themeAuto"></span>
+            </label>
+            <label class="tile">
+              <input type="radio" name="theme" value="light" />
+              <span class="mock mock-light"><i></i><i></i><i></i></span>
+              <span class="tile-label" data-i18n="themeLight"></span>
+            </label>
+            <label class="tile">
+              <input type="radio" name="theme" value="dark" />
+              <span class="mock mock-dark"><i></i><i></i><i></i></span>
+              <span class="tile-label" data-i18n="themeDark"></span>
+            </label>
+          </div>
+          <div class="line">
+            <span class="line-label" data-i18n="setLang"></span>
+            <div id="set-lang" class="seg" role="radiogroup">
+              <label><input type="radio" name="lang" value="zh" /><span>中文</span></label>
+              <label><input type="radio" name="lang" value="en" /><span>English</span></label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h3 class="group-title" data-i18n="groupText"></h3>
+        <div class="card">
+          <label class="line">
+            <span class="line-label" data-i18n="setFont"></span>
+            <select id="set-font" class="ctl"></select>
+          </label>
+          <label class="line" id="field-font-custom" hidden>
+            <span class="line-label" data-i18n="setFontCustom"></span>
+            <input id="set-font-custom" class="ctl" type="text" maxlength="120" spellcheck="false" data-i18n-placeholder="fontCustomHint" />
+          </label>
+          <div class="line line-col">
+            <div class="line-top">
+              <span class="line-label" data-i18n="setFontSize"></span>
+              <span id="font-size-val" class="badge"></span>
+            </div>
+            <div class="slider">
+              <span class="a-sm">A</span>
+              <input id="set-font-size" class="range" type="range" min="11" max="20" step="1" />
+              <span class="a-lg">A</span>
+            </div>
+          </div>
+          <div class="preview-box">
+            <span class="preview-cap" data-i18n="previewLabel"></span>
+            <div class="preview-row">
+              <span class="preview-check"></span>
+              <div>
+                <div class="preview" data-i18n="preview"></div>
+                <div class="preview-meta" data-i18n="previewMeta"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div id="about" class="about">tinyTD</div>
+    </div>
+  </div>
+  <div id="toast" hidden></div>
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

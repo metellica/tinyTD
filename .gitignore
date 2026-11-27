@@ -1,0 +1,6 @@
+/src-tauri/target/
+/src-tauri/gen/schemas/
+/.cargo-home/
+/.toolchain-test/
+/.smoke-stderr.txt
+/probe*.pdb

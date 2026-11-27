@@ -1,0 +1,22 @@
+[package]
+name = "tinytd"
+version = "0.1.0"
+description = "tinyTD · 小而美的 todo.txt 桌面待办"
+edition = "2021"
+rust-version = "1.77.2"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+
+[features]
+# 裸 `cargo run/build --release` 需要它才会内嵌前端资源；`tauri build` 会自动启用。
+custom-protocol = ["tauri/custom-protocol"]
+default = ["custom-protocol"]
