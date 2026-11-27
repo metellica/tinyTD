@@ -20,6 +20,7 @@
   --field-strong: #e2e5ea;
   --hairline-strong: #e2e5ea;
   --accent-glow: rgba(99, 102, 241, 0.22);
+  --doing-bg: #f6f7ff;
   --radius: 8px;
   --font: var(--font-user,) "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC",
     "Noto Sans CJK SC", "Noto Sans SC", "Segoe UI", system-ui, sans-serif;
@@ -47,6 +48,7 @@
   --field-strong: #33353d;
   --hairline-strong: #33353d;
   --accent-glow: rgba(129, 140, 248, 0.25);
+  --doing-bg: #1d1e2a;
 }
 
 html, body, #app { height: 100%; }
@@ -270,6 +272,43 @@ header { display: flex; align-items: center; gap: 8px; padding: 14px 14px 0; }
 .row:hover .act, .act.confirm { visibility: visible; }
 .row:hover .act:hover { background: var(--surface-2); }
 .act.danger:hover { color: var(--danger); }
+.act.doing-btn:hover { color: var(--accent); }
+
+/* ---------- 进行中 ---------- */
+
+.row.doing { background: var(--doing-bg); }
+.row.doing:hover { background: var(--accent-soft); }
+.row.doing + .row.doing { margin-top: 2px; }
+
+.doing-bar {
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+/* 圆圈：accent 描边 + 实心圆点 + 呼吸光晕；悬停时恢复为「完成」对勾 */
+.row.doing .check { border-color: var(--accent); }
+.row.doing .check:not(:hover, :checked) {
+  background: radial-gradient(circle, var(--accent) 0 3px, transparent 3.5px);
+  animation: doing-pulse 2.4s ease-out infinite;
+}
+@keyframes doing-pulse {
+  0% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  70%, 100% { box-shadow: 0 0 0 6px transparent; }
+}
+
+.doing-tag { color: var(--accent); font-weight: 500; }
+
+.group-sep { height: 1px; margin: 6px 10px; background: var(--hairline); }
+
+@media (prefers-reduced-motion: reduce) {
+  .row.doing .check:not(:hover, :checked) { animation: none; }
+}
 
 .empty {
   display: flex;

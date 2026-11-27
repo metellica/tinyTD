@@ -18,6 +18,7 @@ Grab the installer for your platform from the [Releases](https://github.com/mete
 | --- | --- |
 | Add a task | Type in the top input box, press `Enter` |
 | Complete | Click the circle at the start of the row; the task moves to "Done" |
+| In progress | Hover a row and click `▶` to mark it in progress: it's highlighted and pinned to the top with a running timer; `⏸` pauses it and it returns to its original spot |
 | Edit | Click the task text to edit in place (the modified time is recorded) |
 | Delete | Click `✕` at the end of the row, then click again to confirm |
 | Reorder | Drag the `⠿` handle; drop on empty space to move to the end |
@@ -52,15 +53,17 @@ It contains:
 todo.txt:
 2026-11-25T16:09 Reply to the client's email
 2026-11-25T16:12 Fix login page bug mod:2026-11-25T18:02
+2026-11-25T16:20 Refactor login module doing:2026-11-27T10:30
 
 done.txt:
-x 2026-11-25T20:15 2026-11-25T16:09 Write weekly report mod:2026-11-25T17:40
+x 2026-11-25T20:15 2026-11-25T16:09 Write weekly report doing:2026-11-25T19:00 mod:2026-11-25T17:40
 ```
 
 - Each line starts with the created time (`YYYY-MM-DDTHH:MM`, local time; classic date-only `YYYY-MM-DD` todo.txt lines are also accepted)
 - `mod:` marks the last-modified time (only present after the text was actually changed)
+- `doing:` marks a task in progress and records when it started; it's kept on completion so the Done list can show how long it took (restoring a task clears it)
 - Completed lines start with `x <completed time>`, following the todo.txt convention
-- One gotcha: avoid ending a task's text with something shaped exactly like `mod:<timestamp>`, since it would be parsed as the modified time
+- One gotcha: avoid ending a task's text with something shaped exactly like `mod:<timestamp>` or `doing:<timestamp>`, since it would be parsed as a marker
 
 ## Build from source
 
