@@ -11,9 +11,13 @@ const state = {
 };
 
 let dragFrom = -1;
-let dragDoing = false; // 拖动的是否为进行中任务：只允许在同组内排序
-let flipNext = false; // 下一次渲染播放位移动画（仅用于切换进行中，任务 id 不变）
+let dragGroup = ''; // 拖动任务所在的分组：只允许在同组内排序
+let flipNext = false; // 下一次渲染播放位移动画（仅用于切换状态，任务 id 不变）
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+// 'doing' 进行中 | 'paused' 已暂停 | 'todo' 普通待办；也是列表自上而下的分组顺序
+const GROUPS = ['doing', 'paused', 'todo'];
+const statusOf = (t) => (t.doing ? 'doing' : t.spent ? 'paused' : 'todo');
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -51,8 +55,6 @@ const ICONS = {
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   inbox: '<path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5.5 5h13L21 13v5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18v-5z"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
-  play: '<path d="M8 6.2v11.6a.9.9 0 0 0 1.4.75l9-5.8a.9.9 0 0 0 0-1.5l-9-5.8A.9.9 0 0 0 8 6.2z"/>',
-  pause: '<path d="M9 6.5v11M15 6.5v11"/>',
 };
 
 function icon(name) {
@@ -106,21 +108,17 @@ function durText(ms) {
   return tr('dur', Math.floor(mins / 1440), Math.floor((mins % 1440) / 60), mins % 60);
 }
 
-function doingLabel(started) {
+function doingLabel(started, spent) {
   const s = parseTs(started);
   if (!s) return tr('doingNow');
-  return `${tr('doingNow')} · ${durText(Date.now() - s) || tr('doingJust')}`;
+  const total = (spent || 0) * 60000 + (Date.now() - s);
+  return `${tr('doingNow')} · ${durText(total) || tr('doingJust')}`;
 }
 
 function metaLine(t, withCompleted) {
   const parts = [];
   if (withCompleted && t.completed) parts.push(`${tr('completedAt')} ${fmt(t.completed)}`);
-  if (withCompleted && t.started) {
-    const s = parseTs(t.started);
-    const c = parseTs(t.completed);
-    const took = s && c ? durText(c - s) : '';
-    if (took) parts.push(`${tr('took')} ${took}`);
-  }
+  if (withCompleted && t.spent) parts.push(`${tr('took')} ${durText(t.spent * 60000)}`);
   if (t.created) parts.push(`${tr('createdAt')} ${fmt(t.created)}`);
   if (t.modified) parts.push(`${tr('modifiedAt')} ${fmt(t.modified)}`);
   return parts.join(' · ');
@@ -159,11 +157,12 @@ async function tryRun(fn, okMsg) {
 function render() {
   const before = flipNext ? rowTops() : null;
   flipNext = false;
-  const doing = state.tasks.filter((t) => t.doing);
+  const groups = Object.fromEntries(GROUPS.map((g) => [g, []]));
+  for (const t of state.tasks) groups[statusOf(t)].push(t);
   els.countTodo.textContent = state.tasks.length;
   els.countDone.textContent = state.done.length;
   els.clear.hidden = state.tab !== 'done';
-  els.stats.textContent = tr('stats', state.tasks.length, state.done.length, doing.length);
+  els.stats.textContent = tr('stats', state.tasks.length, state.done.length, groups.doing.length, groups.paused.length);
   els.list.replaceChildren();
   const items = state.tab === 'todo' ? state.tasks : state.done;
   if (items.length === 0) {
@@ -176,15 +175,18 @@ function render() {
     for (const t of items) els.list.appendChild(renderDone(t));
     return;
   }
-  // 进行中的任务置顶显示；文件里的行序不变，取消后自然回到原位
-  const rest = state.tasks.filter((t) => !t.doing);
-  for (const t of doing) els.list.appendChild(renderTask(t));
-  if (doing.length && rest.length) {
-    const sep = document.createElement('div');
-    sep.className = 'group-sep';
-    els.list.appendChild(sep);
+  // 按 进行中 / 已暂停 / 待办 分组显示；文件里的行序不变，回到待办时自然回到原位
+  let first = true;
+  for (const g of GROUPS) {
+    if (!groups[g].length) continue;
+    if (!first) {
+      const sep = document.createElement('div');
+      sep.className = 'group-sep';
+      els.list.appendChild(sep);
+    }
+    first = false;
+    for (const t of groups[g]) els.list.appendChild(renderTask(t));
   }
-  for (const t of rest) els.list.appendChild(renderTask(t));
   if (before) playFlip(before);
 }
 
@@ -247,24 +249,34 @@ function metaEl(t, withCompleted) {
   const meta = document.createElement('div');
   meta.className = 'meta';
   const line = metaLine(t, withCompleted);
-  if (!withCompleted && t.doing) {
-    const tag = document.createElement('span');
+  const status = withCompleted ? 'todo' : statusOf(t);
+  if (status === 'todo') {
+    meta.textContent = line;
+    return meta;
+  }
+  const tag = document.createElement('span');
+  if (status === 'doing') {
     tag.className = 'doing-tag';
     tag.dataset.started = t.doing;
-    tag.textContent = doingLabel(t.doing);
-    meta.append(tag, line ? ` · ${line}` : '');
+    tag.dataset.spent = t.spent || 0;
+    tag.textContent = doingLabel(t.doing, t.spent);
   } else {
-    meta.textContent = line;
+    tag.className = 'paused-tag';
+    tag.textContent = `${tr('pausedNow')} · ${tr('spentTotal')} ${durText(t.spent * 60000)}`;
   }
+  meta.append(tag, line ? ` · ${line}` : '');
   return meta;
 }
 
+const CIRCLE_TITLE = { todo: 'circleTodo', doing: 'circleDoing', paused: 'circlePaused' };
+
 function renderTask(t) {
+  const status = statusOf(t);
   const row = document.createElement('div');
-  row.className = t.doing ? 'row doing' : 'row';
+  row.className = status === 'todo' ? 'row' : `row ${status}`;
   row.dataset.id = t.id;
 
-  if (t.doing) {
+  if (status === 'doing') {
     const bar = document.createElement('span');
     bar.className = 'doing-bar';
     row.appendChild(bar);
@@ -278,15 +290,23 @@ function renderTask(t) {
   handle.addEventListener('mouseup', () => (row.draggable = false));
   row.appendChild(handle);
 
-  const cb = document.createElement('input');
-  cb.type = 'checkbox';
-  cb.className = 'check';
-  cb.title = tr('markDone');
-  cb.addEventListener('change', () => {
-    row.classList.add('completing');
-    setTimeout(() => tryRun(() => invoke('complete_task', { id: t.id })), 160);
+  // 圆圈：单击 开始 → 暂停 → 继续 …；Shift+单击 完成
+  const circle = document.createElement('button');
+  circle.className = 'check';
+  circle.title = tr(CIRCLE_TITLE[status]);
+  circle.addEventListener('click', (e) => {
+    if (row.classList.contains('completing')) return;
+    if (e.shiftKey) {
+      circle.classList.add('checked');
+      row.classList.add('completing');
+      setTimeout(() => tryRun(() => invoke('complete_task', { id: t.id })), 160);
+      return;
+    }
+    flipNext = true;
+    const next = status === 'doing' ? 'paused' : 'doing';
+    tryRun(() => invoke('set_status', { id: t.id, status: next })).then(() => (flipNext = false));
   });
-  row.appendChild(cb);
+  row.appendChild(circle);
 
   const body = document.createElement('div');
   body.className = 'body';
@@ -299,18 +319,11 @@ function renderTask(t) {
   body.appendChild(metaEl(t, false));
   row.appendChild(body);
 
-  const toggle = actionBtn(tr(t.doing ? 'stopDoing' : 'startDoing'), t.doing ? 'pause' : 'play');
-  toggle.classList.add('doing-btn');
-  toggle.addEventListener('click', () => {
-    flipNext = true;
-    tryRun(() => invoke('set_doing', { id: t.id, on: !t.doing })).then(() => (flipNext = false));
-  });
-  row.appendChild(toggle);
   row.appendChild(deleteBtn('todo', t.id));
 
   row.addEventListener('dragstart', (e) => {
     dragFrom = t.id;
-    dragDoing = !!t.doing;
+    dragGroup = status;
     row.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
     try { e.dataTransfer.setData('text/plain', String(t.id)); } catch {}
@@ -321,7 +334,7 @@ function renderTask(t) {
     clearMarks();
     dragFrom = -1;
   });
-  const sameGroup = () => dragFrom >= 0 && dragDoing === !!t.doing;
+  const sameGroup = () => dragFrom >= 0 && dragGroup === status;
   row.addEventListener('dragover', (e) => {
     if (!sameGroup()) return clearMarks();
     e.preventDefault();
@@ -387,7 +400,7 @@ function move(from, to) {
 }
 
 // 拖到列表空白处 = 移到末尾（仅普通待办；行与分隔线上的事件由行自己处理）
-const onBlank = (e) => dragFrom >= 0 && !dragDoing && !e.target.closest('.row, .group-sep');
+const onBlank = (e) => dragFrom >= 0 && dragGroup === 'todo' && !e.target.closest('.row, .group-sep');
 els.list.addEventListener('dragover', (e) => {
   if (onBlank(e)) e.preventDefault();
 });
@@ -397,6 +410,13 @@ els.list.addEventListener('drop', (e) => {
   clearMarks();
   move(dragFrom, state.tasks.length);
 });
+
+// 按住 Shift 时，悬停的圆圈预览「完成」
+const setShift = (on) => document.documentElement.classList.toggle('shift', on);
+window.addEventListener('keydown', (e) => e.key === 'Shift' && setShift(true));
+window.addEventListener('keyup', (e) => e.key === 'Shift' && setShift(false));
+window.addEventListener('blur', () => setShift(false));
+els.list.addEventListener('mousemove', (e) => setShift(e.shiftKey));
 
 /* ---------- 行内编辑 ---------- */
 
@@ -703,7 +723,9 @@ if (!invoke) {
   refresh().catch((e) => toast(tErr(e), true));
   // 进行中时长每 30 秒刷新一次，只改文字，不打断编辑/拖拽
   setInterval(() => {
-    for (const tag of els.list.querySelectorAll('.doing-tag')) tag.textContent = doingLabel(tag.dataset.started);
+    for (const tag of els.list.querySelectorAll('.doing-tag')) {
+      tag.textContent = doingLabel(tag.dataset.started, Number(tag.dataset.spent));
+    }
   }, 30000);
   els.add.focus();
   // 通过托盘/热键唤起窗口时，直接聚焦输入框

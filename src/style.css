@@ -25,6 +25,11 @@
   --font: var(--font-user,) "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC",
     "Noto Sans CJK SC", "Noto Sans SC", "Segoe UI", system-ui, sans-serif;
   --fs: 13px;
+  /* 状态圆圈图案（遮罩用，只取形状）。尺寸直接画进 SVG（g 缩放），铺满圆圈内部即居中，无需再变换 */
+  --g-play: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg transform='translate(12 12) scale(.67) translate(-12 -12)'%3E%3Cpath d='M7.5 5.6v12.8a1 1 0 0 0 1.5.86l10.2-6.4a1 1 0 0 0 0-1.72L9 4.74A1 1 0 0 0 7.5 5.6z'/%3E%3C/g%3E%3C/svg%3E");
+  --g-pause: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg transform='translate(12 12) scale(.59) translate(-12 -12)'%3E%3Crect x='5' y='4' width='5' height='16' rx='1.5'/%3E%3Crect x='14' y='4' width='5' height='16' rx='1.5'/%3E%3C/g%3E%3C/svg%3E");
+  --g-dot: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='5.7'/%3E%3C/svg%3E");
+  --g-check: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cg transform='translate(12 12) scale(.74) translate(-12 -12)'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 /* 主题由 JS 解析（跟随系统时读取 prefers-color-scheme）后写入 data-theme */
@@ -200,26 +205,40 @@ header { display: flex; align-items: center; gap: 8px; padding: 14px 14px 0; }
 .row:hover .handle { opacity: 1; }
 .handle:active { cursor: grabbing; }
 
+/* 圆圈：状态按钮。::after 用遮罩绘制图案（颜色走主题变量），悬停时预览单击后的结果 */
 .check {
-  appearance: none;
-  -webkit-appearance: none;
+  --g: var(--g-play);
+  --gc: var(--accent);
+  position: relative;
   width: 16px;
   height: 16px;
+  padding: 0;
   flex: none;
   border: 1.5px solid var(--muted);
   border-radius: 50%;
-  cursor: pointer;
   background: transparent;
+  cursor: pointer;
+  outline: none;
   transition: border-color 0.12s, background 0.12s;
 }
-.check:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft) url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / 10px no-repeat;
+/* 遮罩铺满圆圈内部、不做缩放：mask-position 偏移会被对齐到整像素导致偏心，
+   scale 在合成层上会先栅格化再缩小导致发糊；图案大小已画进 SVG */
+.check::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--gc);
+  -webkit-mask: var(--g) center / 100% 100% no-repeat;
+  mask: var(--g) center / 100% 100% no-repeat;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: opacity 0.12s, transform 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-.check:checked {
-  background: var(--accent) url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / 10px no-repeat;
-  border-color: var(--accent);
-}
+.check:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* 待办：悬停 → ▶ 开始 */
+.check:hover { border-color: var(--accent); background: var(--accent-soft); }
+.check:hover::after { opacity: 1; transform: none; }
 
 .done-mark {
   display: flex;
@@ -272,9 +291,8 @@ header { display: flex; align-items: center; gap: 8px; padding: 14px 14px 0; }
 .row:hover .act, .act.confirm { visibility: visible; }
 .row:hover .act:hover { background: var(--surface-2); }
 .act.danger:hover { color: var(--danger); }
-.act.doing-btn:hover { color: var(--accent); }
 
-/* ---------- 进行中 ---------- */
+/* ---------- 进行中 / 已暂停 ---------- */
 
 .row.doing { background: var(--doing-bg); }
 .row.doing:hover { background: var(--accent-soft); }
@@ -291,23 +309,35 @@ header { display: flex; align-items: center; gap: 8px; padding: 14px 14px 0; }
   pointer-events: none;
 }
 
-/* 圆圈：accent 描边 + 实心圆点 + 呼吸光晕；悬停时恢复为「完成」对勾 */
-.row.doing .check { border-color: var(--accent); }
-.row.doing .check:not(:hover, :checked) {
-  background: radial-gradient(circle, var(--accent) 0 3px, transparent 3.5px);
-  animation: doing-pulse 2.4s ease-out infinite;
-}
-@keyframes doing-pulse {
-  0% { box-shadow: 0 0 0 0 var(--accent-glow); }
-  70%, 100% { box-shadow: 0 0 0 6px transparent; }
-}
+/* 进行中：accent 圆环 + 呼吸的实心圆点（只变透明度，边缘始终清晰）；悬停 → ⏸ 暂停 */
+.row.doing .check { --g: var(--g-dot); border-color: var(--accent); }
+.row.doing .check::after { opacity: 1; transform: none; }
+.row.doing .check:not(:hover)::after { animation: dot-breathe 2.4s ease-in-out infinite; }
+.row.doing .check:hover { --g: var(--g-pause); }
+@keyframes dot-breathe { 50% { opacity: 0.4; } }
+
+/* 已暂停：灰色圆环 + 静止的 ⏸；悬停 → ▶ 继续 */
+.row.paused .check { --g: var(--g-pause); --gc: var(--sub); border-color: var(--sub); }
+.row.paused .check::after { opacity: 1; transform: none; }
+.row.paused .check:hover { --g: var(--g-play); --gc: var(--accent); border-color: var(--accent); }
+
+/* 图案切换时轻微弹入 */
+.row:is(.doing, .paused) .check:hover::after { animation: glyph-pop 0.16s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes glyph-pop { from { opacity: 0.3; transform: scale(0.6); } }
+
+/* 按住 Shift 悬停 / 正在完成：实心 ✓ */
+:root.shift .check:hover,
+:root .row .check.checked { --g: var(--g-check); --gc: #fff; border-color: var(--accent); background: var(--accent); }
+:root.shift .check:hover::after,
+:root .row .check.checked::after { opacity: 1; transform: none; animation: none; }
 
 .doing-tag { color: var(--accent); font-weight: 500; }
+.paused-tag { color: var(--sub); font-weight: 500; }
 
 .group-sep { height: 1px; margin: 6px 10px; background: var(--hairline); }
 
 @media (prefers-reduced-motion: reduce) {
-  .row.doing .check:not(:hover, :checked) { animation: none; }
+  .row.doing .check:not(:hover)::after { animation: none; }
 }
 
 .empty {
@@ -633,3 +663,8 @@ select option { background: var(--bg); color: var(--text); }
 }
 
 [hidden] { display: none !important; }
+
+/* 低于 150% 缩放时 1.5px 边框会被取整成 1px，细圆环发虚；这时改为 2px（高分屏保持 1.5px） */
+@media (max-resolution: 1.49dppx) {
+  .check, .preview-check, .radio { border-width: 2px; }
+}

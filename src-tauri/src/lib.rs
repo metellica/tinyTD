@@ -2,9 +2,9 @@
 //!
 //! 数据格式（纯文本，每行一个任务，可直接用任何编辑器修改、可同步、可 grep）：
 //!
-//! - 待办：`<创建时间> <任务文本> [doing:<开始时间>] [mod:<最后修改时间>]`
-//! - 已完成：`x <完成时间> <创建时间> <任务文本> [doing:<开始时间>] [mod:<最后修改时间>]`
-//! - `doing:` 表示任务正在进行中（界面置顶高亮），完成后保留用于计算用时
+//! - 待办：`<创建时间> <任务文本> [doing:<本段开始时间>] [spent:<累计分钟>] [mod:<最后修改时间>]`
+//! - 已完成：`x <完成时间> <创建时间> <任务文本> [spent:<累计分钟>] [mod:<最后修改时间>]`
+//! - 状态：有 `doing:` 为进行中；只有 `spent:` 为已暂停；都没有为普通待办
 //! - 时间格式：`YYYY-MM-DD` 或 `YYYY-MM-DDTHH:MM`（本地时间），行序即任务顺序
 
 use std::fs;
@@ -140,8 +140,10 @@ pub struct Task {
     pub text: String,
     pub created: String,
     pub modified: Option<String>,
-    /// 进行中的开始时间；为 None 表示普通待办
+    /// 本段进行中的开始时间；有值即「进行中」
     pub doing: Option<String>,
+    /// 之前各段累计的分钟数；没有 doing 但有 spent 即「已暂停」
+    pub spent: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -151,8 +153,8 @@ pub struct DoneTask {
     pub created: String,
     pub completed: String,
     pub modified: Option<String>,
-    /// 曾经标记为进行中的开始时间（用于显示用时）
-    pub started: Option<String>,
+    /// 实际投入的总分钟数（不含暂停时间）
+    pub spent: Option<u32>,
 }
 
 type R<T> = Result<T, String>;
@@ -161,6 +163,22 @@ type R<T> = Result<T, String>;
 
 fn now_ts() -> String {
     chrono::Local::now().format("%Y-%m-%dT%H:%M").to_string()
+}
+
+fn parse_ts(s: &str) -> Option<chrono::NaiveDateTime> {
+    use chrono::{NaiveDate, NaiveDateTime};
+    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
+        .ok()
+        .or_else(|| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()?.and_hms_opt(0, 0, 0))
+}
+
+/// 两个时间之间的整分钟数；无法解析或倒序时为 0
+fn minutes_between(from: &str, to: &str) -> u32 {
+    match (parse_ts(from), parse_ts(to)) {
+        (Some(a), Some(b)) => u32::try_from((b - a).num_minutes()).unwrap_or(0),
+        _ => 0,
+    }
 }
 
 /// 判断是否形如 `YYYY-MM-DD` / `YYYY-MM-DDTHH:MM` / `YYYY-MM-DDTHH:MM:SS`
@@ -198,35 +216,41 @@ fn looks_like_ts(s: &str) -> bool {
 // ---------- 行解析 ----------
 
 /// 一条待办行的各个字段
+///
+/// 状态由标记推出：有 `doing:` 为进行中；只有 `spent:` 为已暂停；都没有为普通待办
 #[derive(Debug, Default, PartialEq)]
 struct ActiveLine {
     text: String,
     created: Option<String>,
     modified: Option<String>,
+    /// 本段进行中的开始时间
     doing: Option<String>,
+    /// 之前各段累计投入的分钟数
+    spent: Option<u32>,
 }
 
 /// 解析待办行
 fn parse_active_line(line: &str) -> ActiveLine {
     let mut rest = line.trim_end();
-    // 行尾的 doing: / mod: 标记，顺序不限（手工编辑可能产生多个，各取最后一个写入的）
-    let mut modified = None;
-    let mut doing = None;
+    // 行尾的 doing: / spent: / mod: 标记，顺序不限（手工编辑可能产生多个，各取最后一个写入的）
+    let (mut modified, mut doing, mut spent) = (None, None, None);
     while let Some((head, tail)) = rest.rsplit_once(' ') {
-        let slot = if let Some(v) = tail.strip_prefix("mod:") {
-            Some((&mut modified, v))
+        let ok = if let Some(v) = tail.strip_prefix("mod:").filter(|v| looks_like_ts(v)) {
+            modified.get_or_insert_with(|| v.to_string());
+            true
+        } else if let Some(v) = tail.strip_prefix("doing:").filter(|v| looks_like_ts(v)) {
+            doing.get_or_insert_with(|| v.to_string());
+            true
+        } else if let Some(n) = tail.strip_prefix("spent:").and_then(|v| v.parse::<u32>().ok()) {
+            spent.get_or_insert(n);
+            true
         } else {
-            tail.strip_prefix("doing:").map(|v| (&mut doing, v))
+            false
         };
-        match slot {
-            Some((slot, v)) if looks_like_ts(v) => {
-                if slot.is_none() {
-                    *slot = Some(v.to_string());
-                }
-                rest = head.trim_end();
-            }
-            _ => break,
+        if !ok {
+            break;
         }
+        rest = head.trim_end();
     }
     // 行首的创建时间
     let (text, created) = match rest.split_once(' ') {
@@ -235,26 +259,47 @@ fn parse_active_line(line: &str) -> ActiveLine {
         }
         _ => (rest.to_string(), None),
     };
-    ActiveLine { text, created, modified, doing }
+    ActiveLine { text, created, modified, doing, spent }
 }
 
-/// 拼装待办行
-fn build_active_line(
-    text: &str,
-    created: &str,
-    doing: Option<&str>,
-    modified: Option<&str>,
-) -> String {
-    let mut line = format!("{created} {text}");
-    if let Some(d) = doing {
-        line.push_str(" doing:");
-        line.push_str(d);
+impl ActiveLine {
+    /// 拼装待办行；没有创建时间时补上当前时间
+    fn to_line(&self) -> String {
+        let created = self.created.clone().unwrap_or_else(now_ts);
+        let mut line = format!("{created} {}", self.text);
+        if let Some(d) = &self.doing {
+            line.push_str(" doing:");
+            line.push_str(d);
+        }
+        if let Some(s) = self.spent {
+            line.push_str(&format!(" spent:{s}"));
+        }
+        if let Some(m) = &self.modified {
+            line.push_str(" mod:");
+            line.push_str(m);
+        }
+        line
     }
-    if let Some(m) = modified {
-        line.push_str(" mod:");
-        line.push_str(m);
+
+    /// 结束当前进行段，计入累计时长
+    fn fold_doing(&mut self, now: &str) {
+        if let Some(start) = self.doing.take() {
+            let total = self.spent.unwrap_or(0) + minutes_between(&start, now);
+            self.spent = (total > 0).then_some(total);
+        }
     }
-    line
+
+    /// 切换到 doing / paused；暂停时累计不足 1 分钟视为误触，直接回到普通待办
+    fn set_status(&mut self, status: &str, now: &str) -> R<()> {
+        match status {
+            "doing" => {
+                self.doing.get_or_insert_with(|| now.to_string());
+            }
+            "paused" => self.fold_doing(now),
+            _ => return Err("状态无效".into()),
+        }
+        Ok(())
+    }
 }
 
 /// 拆开“已完成”行 -> (完成时间, 原始的进行中行)
@@ -317,6 +362,7 @@ fn load_tasks(dir: &Path) -> Vec<Task> {
                 created: l.created.unwrap_or_default(),
                 modified: l.modified,
                 doing: l.doing,
+                spent: l.spent,
             }
         })
         .collect()
@@ -328,14 +374,18 @@ fn load_done(dir: &Path) -> Vec<DoneTask> {
         .enumerate()
         .map(|(id, line)| {
             let (completed, orig) = split_done_line(line);
-            let l = parse_active_line(&orig);
+            let mut l = parse_active_line(&orig);
+            // 兼容完成时仍带 doing: 的旧记录：把这一段计到完成时间为止
+            if let Some(c) = &completed {
+                l.fold_doing(c);
+            }
             DoneTask {
                 id,
                 text: l.text,
                 created: l.created.unwrap_or_default(),
                 completed: completed.unwrap_or_default(),
                 modified: l.modified,
-                started: l.doing,
+                spent: l.spent,
             }
         })
         .collect()
@@ -367,10 +417,12 @@ fn add_task(state: State<AppData>, text: String) -> R<Task> {
     }
     let _g = guard(&state)?;
     let created = now_ts();
-    append_line(
-        &state.dir.join(TODO_FILE),
-        &build_active_line(&text, &created, None, None),
-    )?;
+    let line = ActiveLine {
+        text: text.clone(),
+        created: Some(created.clone()),
+        ..ActiveLine::default()
+    };
+    append_line(&state.dir.join(TODO_FILE), &line.to_line())?;
     let id = read_lines(&state.dir.join(TODO_FILE)).len().saturating_sub(1);
     Ok(Task {
         id,
@@ -378,6 +430,7 @@ fn add_task(state: State<AppData>, text: String) -> R<Task> {
         created,
         modified: None,
         doing: None,
+        spent: None,
     })
 }
 
@@ -393,29 +446,25 @@ fn update_task(state: State<AppData>, id: usize, text: String) -> R<()> {
     if id >= lines.len() {
         return Err("任务不存在，可能刚被修改，请刷新后重试".into());
     }
-    let l = parse_active_line(&lines[id]);
-    let created = l.created.unwrap_or_else(now_ts);
-    lines[id] = build_active_line(&text, &created, l.doing.as_deref(), Some(&now_ts()));
+    let mut l = parse_active_line(&lines[id]);
+    l.text = text;
+    l.modified = Some(now_ts());
+    lines[id] = l.to_line();
     write_lines(&path, &lines)
 }
 
-/// 标记 / 取消「进行中」；只是状态切换，不算内容修改，不更新 mod:
+/// 切换进行中 / 已暂停（status 为 "doing" 或 "paused"）；只是状态变化，不更新 mod:
 #[tauri::command]
-fn set_doing(state: State<AppData>, id: usize, on: bool) -> R<()> {
+fn set_status(state: State<AppData>, id: usize, status: String) -> R<()> {
     let _g = guard(&state)?;
     let path = state.dir.join(TODO_FILE);
     let mut lines = read_lines(&path);
     if id >= lines.len() {
         return Err("任务不存在，可能刚被修改，请刷新后重试".into());
     }
-    let l = parse_active_line(&lines[id]);
-    let doing = match (on, l.doing) {
-        (true, Some(started)) => Some(started),
-        (true, None) => Some(now_ts()),
-        (false, _) => None,
-    };
-    let created = l.created.unwrap_or_else(now_ts);
-    lines[id] = build_active_line(&l.text, &created, doing.as_deref(), l.modified.as_deref());
+    let mut l = parse_active_line(&lines[id]);
+    l.set_status(&status, &now_ts())?;
+    lines[id] = l.to_line();
     write_lines(&path, &lines)
 }
 
@@ -456,12 +505,16 @@ fn complete_task(state: State<AppData>, id: usize) -> R<()> {
     if id >= lines.len() {
         return Err("任务不存在，可能刚被修改，请刷新后重试".into());
     }
-    let line = lines.remove(id);
+    let mut line = lines.remove(id);
     write_lines(&todo, &lines)?;
-    append_line(
-        &state.dir.join(DONE_FILE),
-        &format!("x {} {}", now_ts(), line),
-    )
+    let now = now_ts();
+    // 进行中的任务：把当前这一段计入累计用时
+    let mut l = parse_active_line(&line);
+    if l.doing.is_some() {
+        l.fold_doing(&now);
+        line = l.to_line();
+    }
+    append_line(&state.dir.join(DONE_FILE), &format!("x {now} {line}"))
 }
 
 #[tauri::command]
@@ -476,12 +529,14 @@ fn restore_task(state: State<AppData>, id: usize) -> R<()> {
     write_lines(&done, &lines)?;
     let (_, orig) = split_done_line(&line);
     let l = parse_active_line(&orig);
-    let created = l.created.unwrap_or_else(now_ts);
-    // 恢复后回到普通待办，不再处于进行中
-    append_line(
-        &state.dir.join(TODO_FILE),
-        &build_active_line(&l.text, &created, None, Some(&now_ts())),
-    )
+    // 恢复后回到普通待办：清掉进行中 / 累计用时
+    let restored = ActiveLine {
+        text: l.text,
+        created: l.created,
+        modified: Some(now_ts()),
+        ..ActiveLine::default()
+    };
+    append_line(&state.dir.join(TODO_FILE), &restored.to_line())
 }
 
 #[tauri::command]
@@ -711,7 +766,7 @@ pub fn run() {
             list_done,
             add_task,
             update_task,
-            set_doing,
+            set_status,
             remove_task,
             move_task,
             complete_task,
@@ -751,32 +806,67 @@ mod tests {
         assert_eq!(l.created.as_deref(), Some("2026-11-25T16:09"));
         assert_eq!(l.modified.as_deref(), Some("2026-11-25T18:02"));
         assert_eq!(l.doing, None);
-        assert_eq!(
-            build_active_line(&l.text, l.created.as_deref().unwrap(), None, l.modified.as_deref()),
-            line
-        );
+        assert_eq!(l.to_line(), line);
     }
 
     #[test]
-    fn doing_roundtrip() {
-        let line = "2026-11-25T16:09 写周报 doing:2026-11-27T10:30 mod:2026-11-25T18:02";
+    fn status_markers_roundtrip() {
+        let line = "2026-11-25T16:09 写周报 doing:2026-11-27T10:30 spent:45 mod:2026-11-25T18:02";
         let l = parse_active_line(line);
         assert_eq!(l.text, "写周报");
         assert_eq!(l.doing.as_deref(), Some("2026-11-27T10:30"));
+        assert_eq!(l.spent, Some(45));
         assert_eq!(l.modified.as_deref(), Some("2026-11-25T18:02"));
-        assert_eq!(
-            build_active_line(&l.text, "2026-11-25T16:09", l.doing.as_deref(), l.modified.as_deref()),
-            line
-        );
+        assert_eq!(l.to_line(), line);
         // 手工编辑后标记顺序颠倒也能识别
-        let l = parse_active_line("2026-11-25 写周报 mod:2026-11-26 doing:2026-11-27T10:30");
+        let l = parse_active_line("2026-11-25 写周报 mod:2026-11-26 spent:3 doing:2026-11-27T10:30");
         assert_eq!(l.text, "写周报");
         assert_eq!(l.doing.as_deref(), Some("2026-11-27T10:30"));
+        assert_eq!(l.spent, Some(3));
         assert_eq!(l.modified.as_deref(), Some("2026-11-26"));
-        // 正文中间的 doing: 不算标记
-        let l = parse_active_line("2026-11-25 记录 doing:xxx 的含义");
-        assert_eq!(l.text, "记录 doing:xxx 的含义");
-        assert_eq!(l.doing, None);
+        // 正文中的、或值不合法的标记不算
+        let l = parse_active_line("2026-11-25 记录 doing:xxx 的含义 spent:abc");
+        assert_eq!(l.text, "记录 doing:xxx 的含义 spent:abc");
+        assert_eq!((l.doing, l.spent), (None, None));
+    }
+
+    #[test]
+    fn status_transitions() {
+        let mut l = parse_active_line("2026-11-25T16:09 写周报");
+        // 开始
+        l.set_status("doing", "2026-11-27T10:00").unwrap();
+        assert_eq!(l.doing.as_deref(), Some("2026-11-27T10:00"));
+        // 重复开始不会重置开始时间
+        l.set_status("doing", "2026-11-27T10:05").unwrap();
+        assert_eq!(l.doing.as_deref(), Some("2026-11-27T10:00"));
+        // 暂停：计入累计
+        l.set_status("paused", "2026-11-27T10:45").unwrap();
+        assert_eq!((l.doing.as_deref(), l.spent), (None, Some(45)));
+        // 继续 -> 再暂停（跨天）：继续累加
+        l.set_status("doing", "2026-11-27T23:50").unwrap();
+        l.set_status("paused", "2026-11-28T00:20").unwrap();
+        assert_eq!(l.spent, Some(75));
+        // 已暂停时再暂停无变化
+        l.set_status("paused", "2026-11-28T09:00").unwrap();
+        assert_eq!(l.spent, Some(75));
+        assert!(l.set_status("bogus", "2026-11-28T09:00").is_err());
+    }
+
+    #[test]
+    fn quick_pause_reverts_to_todo() {
+        let mut l = parse_active_line("2026-11-25T16:09 写周报");
+        l.set_status("doing", "2026-11-27T10:00").unwrap();
+        l.set_status("paused", "2026-11-27T10:00").unwrap();
+        assert_eq!((l.doing.as_deref(), l.spent), (None, None));
+        assert_eq!(l.to_line(), "2026-11-25T16:09 写周报");
+    }
+
+    #[test]
+    fn minutes_between_shapes() {
+        assert_eq!(minutes_between("2026-11-27T10:00", "2026-11-27T11:30"), 90);
+        assert_eq!(minutes_between("2026-11-27", "2026-11-27T01:00"), 60);
+        assert_eq!(minutes_between("2026-11-27T11:00", "2026-11-27T10:00"), 0);
+        assert_eq!(minutes_between("garbage", "2026-11-27T10:00"), 0);
     }
 
     #[test]
@@ -798,14 +888,28 @@ mod tests {
 
     #[test]
     fn done_roundtrip() {
-        let active = build_active_line("写周报", "2026-11-25T16:09", Some("2026-11-25T19:00"), None);
-        let done = format!("x 2026-11-25T20:15 {active}");
+        let active = ActiveLine {
+            text: "写周报".into(),
+            created: Some("2026-11-25T16:09".into()),
+            spent: Some(70),
+            ..ActiveLine::default()
+        };
+        let done = format!("x 2026-11-25T20:15 {}", active.to_line());
         let (completed, orig) = split_done_line(&done);
         assert_eq!(completed.as_deref(), Some("2026-11-25T20:15"));
         let l = parse_active_line(&orig);
         assert_eq!(l.text, "写周报");
         assert_eq!(l.created.as_deref(), Some("2026-11-25T16:09"));
-        assert_eq!(l.doing.as_deref(), Some("2026-11-25T19:00"));
+        assert_eq!(l.spent, Some(70));
+    }
+
+    #[test]
+    fn legacy_done_with_doing_counts_until_completion() {
+        let (completed, orig) =
+            split_done_line("x 2026-11-25T20:15 2026-11-25T16:09 写周报 doing:2026-11-25T19:00");
+        let mut l = parse_active_line(&orig);
+        l.fold_doing(completed.as_deref().unwrap());
+        assert_eq!((l.doing, l.spent), (None, Some(75)));
     }
 
     #[test]
