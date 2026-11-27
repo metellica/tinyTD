@@ -30,7 +30,17 @@ const I18N = {
     del: '删除',
     confirm: '确认?',
     dragTitle: '拖动调整顺序',
-    clickEdit: '点击编辑',
+    clickEdit: '点击展开：修改标题、写笔记',
+    clickNote: '点击展开笔记',
+    hasNote: '有笔记',
+    fullscreen: '全屏',
+    notePlaceholder: '停在哪了？下一步做什么？在等谁？\n可直接粘贴截图',
+    noteHint: 'Ctrl+B 粗体 · Ctrl+I 斜体 · 行首输入 - 或 1. 加空格变列表 · 可粘贴/拖入图片 · Ctrl+点击打开链接 · 双击图片查看大图',
+    setAutoNote: '暂停 / 继续时展开笔记',
+    setAutoNoteDesc: '暂停时顺手记下停在哪；继续时把上次的笔记摆出来',
+    on: '开',
+    off: '关',
+    noteSaveFailed: '笔记保存失败',
     restoreTitle: '恢复为待办',
     restored: '已恢复为待办',
     deleted: '已删除',
@@ -98,7 +108,17 @@ const I18N = {
     del: 'Delete',
     confirm: 'Sure?',
     dragTitle: 'Drag to reorder',
-    clickEdit: 'Click to edit',
+    clickEdit: 'Click to expand: edit title, write notes',
+    clickNote: 'Click to expand notes',
+    hasNote: 'Has notes',
+    fullscreen: 'Full screen',
+    notePlaceholder: 'Where did you stop? What\'s next? Waiting on whom?\nPaste screenshots directly',
+    noteHint: 'Ctrl+B bold · Ctrl+I italic · type - or 1. then space for a list · paste/drop images · Ctrl+click opens links · double-click an image to enlarge',
+    setAutoNote: 'Expand notes on pause / resume',
+    setAutoNoteDesc: 'Jot down where you stopped when pausing; see it again when resuming',
+    on: 'On',
+    off: 'Off',
+    noteSaveFailed: 'Failed to save note',
     restoreTitle: 'Restore to to-do',
     restored: 'Restored to to-do',
     deleted: 'Deleted',
@@ -145,6 +165,10 @@ const ERR_EN = {
   '位置无效': 'Invalid position',
   '内部锁异常': 'Internal lock error',
   '热键必须包含 Ctrl / Alt / Shift / Cmd 中的至少一个': 'Shortcut needs Ctrl / Alt / Shift / Cmd',
+  '参数无效': 'Invalid argument',
+  '笔记编号无效': 'Invalid note id',
+  '不支持的图片格式': 'Unsupported image format',
+  '图片过大（上限 20 MB）': 'Image too large (max 20 MB)',
 };
 
 let currentLang = 'zh';
@@ -166,5 +190,5 @@ function setLang(lang) {
   document.querySelectorAll('[data-i18n-title]').forEach((n) => (n.title = tr(n.dataset.i18nTitle)));
   document
     .querySelectorAll('[data-i18n-placeholder]')
-    .forEach((n) => (n.placeholder = tr(n.dataset.i18nPlaceholder)));
+    .forEach((n) => n.setAttribute('placeholder', tr(n.dataset.i18nPlaceholder)));
 }

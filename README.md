@@ -19,13 +19,14 @@ Grab the installer for your platform from the [Releases](https://github.com/mete
 | Add a task | Type in the top input box, press `Enter` |
 | Start / pause | Click the circle at the start of the row: ○ to do → ◉ in progress (highlighted, pinned to the top, live timer) → ⏸ paused (time accumulates) → click again to resume; pausing within 1 minute counts as a misclick and returns it to a plain to-do |
 | Complete | `Shift` + click the circle; the task moves to "Done" with the actual time spent. Hold `Shift` while hovering the circle to preview ✓ |
-| Edit | Click the task text to edit in place (the modified time is recorded) |
+| Edit / notes | Click a task (anywhere except the circle and row buttons) to expand it in place into a card: edit the title directly (`Enter` jumps to the notes, the modified time is recorded) and write notes below it: rich text, paste or drop screenshots, auto-saved. `⤢` switches to full screen. Click outside or press `Esc` to collapse. Only one card is open at a time; tasks with notes show a faint `≡` mark |
+| Pause / resume notes | Pausing expands the card with a `⏸ time` divider so you can jot down where you stopped (just click elsewhere to skip, nothing is kept); resuming a task with notes expands them so you can pick up the context (can be turned off in Settings) |
 | Delete | Click `✕` at the end of the row, then click again to confirm |
 | Reorder | Drag the `⠿` handle; drop on empty space to move to the end |
 | Restore | Click `↩` in the Done list |
 | Clear done | "Clear" at the top right (asks for confirmation) |
 | Show / hide | Global hotkey (default `Ctrl+K`, configurable in Settings) or a click on the tray icon; launching the app again just brings up the running window (single instance) |
-| Settings | ⚙ at the top right: global hotkey, close-button behavior (minimize to taskbar / hide to tray / quit; default is minimize), light / dark / follow system, 中文 / English, font and font size |
+| Settings | ⚙ at the top right: global hotkey, close-button behavior (minimize to taskbar / hide to tray / quit; default is minimize), expand notes on pause / resume, light / dark / follow system, 中文 / English, font and font size |
 | Quit | Depends on the close-button setting; right-click the tray icon → "Quit" always works |
 
 - 🕒 **Timestamps**: every task records its created time and last-modified time, plus a completed time when done, shown in small text under the task.
@@ -45,6 +46,7 @@ It contains:
 - `todo.txt`: active tasks, **line order is task order**
 - `done.txt`: completed tasks (appended in completion order)
 - `settings.json`: UI settings (maintained by the settings panel)
+- `notes/<id>.md`: task notes in Markdown (the line carries `note:<id>`); images live in `notes/<id>/`. Deleting a task or clearing Done removes its notes too
 
 > For a portable setup or syncing (cloud drive / git), set the `TINYTD_DATA_DIR` environment variable to point the data directory at any folder, for example:
 > `$env:TINYTD_DATA_DIR = 'D:\sync\tinytd'`
@@ -55,17 +57,24 @@ todo.txt:
 2026-11-25T16:12 Fix login page bug mod:2026-11-25T18:02
 2026-11-25T16:20 Refactor login module doing:2026-11-27T10:30 spent:45
 2026-11-25T16:30 Tidy up meeting notes spent:20
+2026-11-25T16:40 Hook up payment callback spent:130 note:mi2x8k0a
 
 done.txt:
 x 2026-11-25T20:15 2026-11-25T16:09 Write weekly report spent:75 mod:2026-11-25T17:40
+
+notes/mi2x8k0a.md:
+### ⏸ 2026-11-27 18:40
+Waiting on Zhang for the /refund API doc, branch **feat/pay-cb**
+![](mi2x8k0a/20261127-184012.png)
 ```
 
 - Each line starts with the created time (`YYYY-MM-DDTHH:MM`, local time; classic date-only `YYYY-MM-DD` todo.txt lines are also accepted)
 - `mod:` marks the last-modified time (only present after the text was actually changed)
 - `doing:` means in progress and records when the current session started; `spent:` is the minutes accumulated before it. `doing:` present = in progress; only `spent:` = paused
 - On completion the running session is added to `spent:`, so the time shown in Done excludes paused time; restoring a task clears both
+- `note:` links the task to its notes file; the note supports a Markdown subset (`#` headings, `-` / `1.` lists, bold, italic, strikethrough, code, links, images), other formatting is dropped
 - Completed lines start with `x <completed time>`, following the todo.txt convention
-- One gotcha: avoid ending a task's text with something shaped exactly like `mod:<timestamp>`, `doing:<timestamp>` or `spent:<number>`, since it would be parsed as a marker
+- One gotcha: avoid ending a task's text with something shaped exactly like `mod:<timestamp>`, `doing:<timestamp>`, `spent:<number>` or `note:<id>`, since it would be parsed as a marker
 
 ## Build from source
 
@@ -94,6 +103,7 @@ tinyTD/
 │  ├─ index.html
 │  ├─ style.css
 │  ├─ i18n.js              Chinese / English UI strings
+│  ├─ md.js                Markdown subset ⇄ note editor HTML
 │  └─ app.js
 ├─ src-tauri/
 │  ├─ tauri.conf.json      Tauri 2 config (window / assets / icons)

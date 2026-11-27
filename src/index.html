@@ -74,6 +74,16 @@
               </button>
             </div>
           </div>
+          <div class="line">
+            <span class="line-text">
+              <span class="line-label" data-i18n="setAutoNote"></span>
+              <span class="line-desc" data-i18n="setAutoNoteDesc"></span>
+            </span>
+            <div id="set-auto-note" class="seg" role="radiogroup">
+              <label><input type="radio" name="auto-note" value="on" /><span data-i18n="on"></span></label>
+              <label><input type="radio" name="auto-note" value="off" /><span data-i18n="off"></span></label>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -145,8 +155,25 @@
       <div id="about" class="about">tinyTD</div>
     </div>
   </div>
+
+  <div id="note" class="sheet" role="dialog" aria-modal="true" hidden>
+    <div class="sheet-head note-head">
+      <button id="btn-note-close" class="icon-btn back" data-i18n-title="close">
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <div class="note-titles">
+        <h2 id="note-title"></h2>
+        <div id="note-meta" class="note-meta"></div>
+      </div>
+    </div>
+    <div class="sheet-body note-body">
+      <div id="note-editor" contenteditable="true" spellcheck="false"></div>
+    </div>
+    <div class="note-hint" data-i18n="noteHint"></div>
+  </div>
   <div id="toast" hidden></div>
   <script src="i18n.js"></script>
+  <script src="md.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

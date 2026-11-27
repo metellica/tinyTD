@@ -2,10 +2,11 @@
 //!
 //! 数据格式（纯文本，每行一个任务，可直接用任何编辑器修改、可同步、可 grep）：
 //!
-//! - 待办：`<创建时间> <任务文本> [doing:<本段开始时间>] [spent:<累计分钟>] [mod:<最后修改时间>]`
-//! - 已完成：`x <完成时间> <创建时间> <任务文本> [spent:<累计分钟>] [mod:<最后修改时间>]`
+//! - 待办：`<创建时间> <任务文本> [doing:<本段开始时间>] [spent:<累计分钟>] [note:<笔记编号>] [mod:<最后修改时间>]`
+//! - 已完成：`x <完成时间> <创建时间> <任务文本> [spent:<累计分钟>] [note:<笔记编号>] [mod:<最后修改时间>]`
 //! - 状态：有 `doing:` 为进行中；只有 `spent:` 为已暂停；都没有为普通待办
 //! - 时间格式：`YYYY-MM-DD` 或 `YYYY-MM-DDTHH:MM`（本地时间），行序即任务顺序
+//! - 笔记：`notes/<编号>.md`（Markdown），其中的图片存放在 `notes/<编号>/`
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,11 @@ const DEFAULT_HOTKEY: &str = "Ctrl+K";
 const TODO_FILE: &str = "todo.txt";
 const DONE_FILE: &str = "done.txt";
 const SETTINGS_FILE: &str = "settings.json";
+const NOTES_DIR: &str = "notes";
+/// 笔记 URI 协议：前端通过 `convertFileSrc("<编号>/<文件>", "tdnote")` 显示笔记里的图片
+const NOTE_SCHEME: &str = "tdnote";
+const NOTE_IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
+const NOTE_IMAGE_MAX: usize = 20 * 1024 * 1024;
 
 /// 运行时状态：数据目录 + 文件读写锁 + 用户设置
 pub struct AppData {
@@ -51,6 +57,8 @@ pub struct Settings {
     pub font_size: u32,
     /// 全局唤起热键，如 `Ctrl+K`、`Ctrl+Alt+T`、`Cmd+Shift+Space`
     pub hotkey: String,
+    /// 暂停（及隔天继续）时自动打开任务笔记
+    pub auto_note: bool,
 }
 
 impl Default for Settings {
@@ -62,6 +70,7 @@ impl Default for Settings {
             font: String::new(),
             font_size: 13,
             hotkey: DEFAULT_HOTKEY.into(),
+            auto_note: true,
         }
     }
 }
@@ -144,6 +153,10 @@ pub struct Task {
     pub doing: Option<String>,
     /// 之前各段累计的分钟数；没有 doing 但有 spent 即「已暂停」
     pub spent: Option<u32>,
+    /// 笔记编号；第一次写笔记时才分配
+    pub note: Option<String>,
+    /// 笔记正文非空（主界面据此显示小标记）
+    pub has_note: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -155,6 +168,8 @@ pub struct DoneTask {
     pub modified: Option<String>,
     /// 实际投入的总分钟数（不含暂停时间）
     pub spent: Option<u32>,
+    pub note: Option<String>,
+    pub has_note: bool,
 }
 
 type R<T> = Result<T, String>;
@@ -227,13 +242,20 @@ struct ActiveLine {
     doing: Option<String>,
     /// 之前各段累计投入的分钟数
     spent: Option<u32>,
+    /// 笔记编号
+    note: Option<String>,
+}
+
+/// 笔记编号：4~16 位小写字母或数字（也用作文件名，必须严格校验）
+fn valid_note_key(s: &str) -> bool {
+    (4..=16).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
 }
 
 /// 解析待办行
 fn parse_active_line(line: &str) -> ActiveLine {
     let mut rest = line.trim_end();
-    // 行尾的 doing: / spent: / mod: 标记，顺序不限（手工编辑可能产生多个，各取最后一个写入的）
-    let (mut modified, mut doing, mut spent) = (None, None, None);
+    // 行尾的 doing: / spent: / note: / mod: 标记，顺序不限（手工编辑可能产生多个，各取最后一个写入的）
+    let (mut modified, mut doing, mut spent, mut note) = (None, None, None, None);
     while let Some((head, tail)) = rest.rsplit_once(' ') {
         let ok = if let Some(v) = tail.strip_prefix("mod:").filter(|v| looks_like_ts(v)) {
             modified.get_or_insert_with(|| v.to_string());
@@ -243,6 +265,9 @@ fn parse_active_line(line: &str) -> ActiveLine {
             true
         } else if let Some(n) = tail.strip_prefix("spent:").and_then(|v| v.parse::<u32>().ok()) {
             spent.get_or_insert(n);
+            true
+        } else if let Some(v) = tail.strip_prefix("note:").filter(|v| valid_note_key(v)) {
+            note.get_or_insert_with(|| v.to_string());
             true
         } else {
             false
@@ -259,7 +284,7 @@ fn parse_active_line(line: &str) -> ActiveLine {
         }
         _ => (rest.to_string(), None),
     };
-    ActiveLine { text, created, modified, doing, spent }
+    ActiveLine { text, created, modified, doing, spent, note }
 }
 
 impl ActiveLine {
@@ -273,6 +298,10 @@ impl ActiveLine {
         }
         if let Some(s) = self.spent {
             line.push_str(&format!(" spent:{s}"));
+        }
+        if let Some(n) = &self.note {
+            line.push_str(" note:");
+            line.push_str(n);
         }
         if let Some(m) = &self.modified {
             line.push_str(" mod:");
@@ -363,6 +392,8 @@ fn load_tasks(dir: &Path) -> Vec<Task> {
                 modified: l.modified,
                 doing: l.doing,
                 spent: l.spent,
+                has_note: has_note(dir, &l.note),
+                note: l.note,
             }
         })
         .collect()
@@ -386,9 +417,136 @@ fn load_done(dir: &Path) -> Vec<DoneTask> {
                 completed: completed.unwrap_or_default(),
                 modified: l.modified,
                 spent: l.spent,
+                has_note: has_note(dir, &l.note),
+                note: l.note,
             }
         })
         .collect()
+}
+
+// ---------- 笔记 ----------
+
+fn notes_dir(dir: &Path) -> PathBuf {
+    dir.join(NOTES_DIR)
+}
+
+fn has_note(dir: &Path, key: &Option<String>) -> bool {
+    key.as_deref()
+        .is_some_and(|k| notes_dir(dir).join(format!("{k}.md")).is_file())
+}
+
+/// 生成新的笔记编号：当前毫秒数的 36 进制，已被占用时顺延
+fn new_note_key(dir: &Path) -> String {
+    let mut n = chrono::Local::now().timestamp_millis().max(0) as u64;
+    loop {
+        let mut key = String::new();
+        let mut v = n;
+        loop {
+            let d = (v % 36) as u32;
+            key.insert(0, char::from_digit(d, 36).unwrap_or('0'));
+            v /= 36;
+            if v == 0 {
+                break;
+            }
+        }
+        while key.len() < 4 {
+            key.insert(0, '0');
+        }
+        let nd = notes_dir(dir);
+        if !nd.join(format!("{key}.md")).exists() && !nd.join(&key).exists() {
+            return key;
+        }
+        n += 1;
+    }
+}
+
+fn check_note_key(key: &str) -> R<()> {
+    if valid_note_key(key) {
+        Ok(())
+    } else {
+        Err("笔记编号无效".into())
+    }
+}
+
+/// 删除笔记正文与图片目录（不存在时忽略）
+fn remove_note(dir: &Path, key: &str) {
+    if !valid_note_key(key) {
+        return;
+    }
+    let nd = notes_dir(dir);
+    let _ = fs::remove_file(nd.join(format!("{key}.md")));
+    let _ = fs::remove_dir_all(nd.join(key));
+}
+
+/// 从一行待办（`done = false`）或已完成（`done = true`）里取出笔记编号
+fn note_of_line(line: &str, done: bool) -> Option<String> {
+    if done {
+        parse_active_line(&split_done_line(line).1).note
+    } else {
+        parse_active_line(line).note
+    }
+}
+
+/// 删掉笔记图片目录里正文不再引用的图片
+fn prune_note_images(dir: &Path, key: &str, content: &str) {
+    let img_dir = notes_dir(dir).join(key);
+    let Ok(entries) = fs::read_dir(&img_dir) else { return };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !content.contains(&format!("{key}/{name}")) {
+            let _ = fs::remove_file(e.path());
+        }
+    }
+    let _ = fs::remove_dir(&img_dir); // 只在已空时成功
+}
+
+/// 图片文件名只允许 `[0-9a-z-]+.<扩展名>`，避免路径穿越
+fn valid_image_name(name: &str) -> bool {
+    match name.rsplit_once('.') {
+        Some((stem, ext)) => {
+            !stem.is_empty()
+                && stem.len() <= 40
+                && stem.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+                && NOTE_IMAGE_EXTS.contains(&ext)
+        }
+        None => false,
+    }
+}
+
+fn percent_decode(s: &str) -> String {
+    let hex = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
+                out.push(h << 4 | l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// `tdnote://localhost/<编号>/<文件>` -> 笔记图片的绝对路径
+fn note_image_path(dir: &Path, uri_path: &str) -> Option<PathBuf> {
+    let p = percent_decode(uri_path.trim_start_matches('/'));
+    let (key, name) = p.split_once('/')?;
+    (valid_note_key(key) && valid_image_name(name)).then(|| notes_dir(dir).join(key).join(name))
+}
+
+fn image_mime(name: &str) -> &'static str {
+    match name.rsplit_once('.').map(|(_, e)| e) {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "application/octet-stream",
+    }
 }
 
 fn guard<'a, 'r>(state: &'a State<'r, AppData>) -> R<MutexGuard<'a, ()>> {
@@ -431,6 +589,8 @@ fn add_task(state: State<AppData>, text: String) -> R<Task> {
         modified: None,
         doing: None,
         spent: None,
+        note: None,
+        has_note: false,
     })
 }
 
@@ -476,8 +636,12 @@ fn remove_task(state: State<AppData>, id: usize) -> R<()> {
     if id >= lines.len() {
         return Err("任务不存在，可能刚被修改，请刷新后重试".into());
     }
-    lines.remove(id);
-    write_lines(&path, &lines)
+    let line = lines.remove(id);
+    write_lines(&path, &lines)?;
+    if let Some(key) = note_of_line(&line, false) {
+        remove_note(&state.dir, &key);
+    }
+    Ok(())
 }
 
 /// 把第 `from` 行移动到「原数组的第 `to` 个插槽」（0..=len，指向移动前的下标空间）
@@ -529,11 +693,12 @@ fn restore_task(state: State<AppData>, id: usize) -> R<()> {
     write_lines(&done, &lines)?;
     let (_, orig) = split_done_line(&line);
     let l = parse_active_line(&orig);
-    // 恢复后回到普通待办：清掉进行中 / 累计用时
+    // 恢复后回到普通待办：清掉进行中 / 累计用时，笔记保留
     let restored = ActiveLine {
         text: l.text,
         created: l.created,
         modified: Some(now_ts()),
+        note: l.note,
         ..ActiveLine::default()
     };
     append_line(&state.dir.join(TODO_FILE), &restored.to_line())
@@ -547,14 +712,144 @@ fn delete_done(state: State<AppData>, id: usize) -> R<()> {
     if id >= lines.len() {
         return Err("任务不存在，可能刚被修改，请刷新后重试".into());
     }
-    lines.remove(id);
-    write_lines(&path, &lines)
+    let line = lines.remove(id);
+    write_lines(&path, &lines)?;
+    if let Some(key) = note_of_line(&line, true) {
+        remove_note(&state.dir, &key);
+    }
+    Ok(())
 }
 
 #[tauri::command]
 fn clear_done(state: State<AppData>) -> R<()> {
     let _g = guard(&state)?;
-    write_lines(&state.dir.join(DONE_FILE), &[])
+    let path = state.dir.join(DONE_FILE);
+    let lines = read_lines(&path);
+    write_lines(&path, &[])?;
+    for key in lines.iter().filter_map(|l| note_of_line(l, true)) {
+        remove_note(&state.dir, &key);
+    }
+    Ok(())
+}
+
+/// 在行列表里定位任务：先看 `id` 这一行，对不上（行序已变）再按创建时间 + 文本查找
+fn locate_line(lines: &[String], done: bool, id: usize, created: &str, text: &str) -> Option<usize> {
+    let matches = |line: &String| {
+        let l = if done { parse_active_line(&split_done_line(line).1) } else { parse_active_line(line) };
+        l.text == text && l.created.as_deref().unwrap_or("") == created
+    };
+    if lines.get(id).is_some_and(matches) {
+        return Some(id);
+    }
+    lines.iter().position(matches)
+}
+
+/// 取得任务的笔记编号；没有时分配一个并写回该行（不算修改，不更新 mod:）
+/// `scope` 为 `todo` 或 `done`；`created` + `text` 用来确认是同一个任务
+#[tauri::command]
+fn note_key(
+    state: State<AppData>,
+    scope: String,
+    id: usize,
+    created: String,
+    text: String,
+) -> R<String> {
+    let _g = guard(&state)?;
+    let done = match scope.as_str() {
+        "todo" => false,
+        "done" => true,
+        _ => return Err("参数无效".into()),
+    };
+    let path = state.dir.join(if done { DONE_FILE } else { TODO_FILE });
+    let mut lines = read_lines(&path);
+    let id = locate_line(&lines, done, id, &created, &text)
+        .ok_or("任务不存在，可能刚被修改，请刷新后重试")?;
+    if let Some(key) = note_of_line(&lines[id], done) {
+        return Ok(key);
+    }
+    let key = new_note_key(&state.dir);
+    lines[id] = if done {
+        let (completed, orig) = split_done_line(&lines[id]);
+        let mut l = parse_active_line(&orig);
+        l.note = Some(key.clone());
+        match completed {
+            Some(c) => format!("x {c} {}", l.to_line()),
+            None => format!("x {}", l.to_line()),
+        }
+    } else {
+        let mut l = parse_active_line(&lines[id]);
+        l.note = Some(key.clone());
+        l.to_line()
+    };
+    write_lines(&path, &lines)?;
+    Ok(key)
+}
+
+#[tauri::command]
+fn read_note(state: State<AppData>, key: String) -> R<String> {
+    check_note_key(&key)?;
+    let _g = guard(&state)?;
+    Ok(fs::read_to_string(notes_dir(&state.dir).join(format!("{key}.md"))).unwrap_or_default())
+}
+
+/// 保存笔记正文；内容为空则删除文件。`prune` 时顺带清理不再引用的图片（关闭笔记时）
+#[tauri::command]
+fn write_note(state: State<AppData>, key: String, content: String, prune: bool) -> R<()> {
+    check_note_key(&key)?;
+    let _g = guard(&state)?;
+    let nd = notes_dir(&state.dir);
+    let file = nd.join(format!("{key}.md"));
+    if content.trim().is_empty() {
+        let _ = fs::remove_file(&file);
+    } else {
+        fs::create_dir_all(&nd).map_err(|e| format!("写入失败：{e}"))?;
+        let mut body = content.trim_end().to_string();
+        body.push('\n');
+        fs::write(&file, body).map_err(|e| format!("写入失败：{e}"))?;
+    }
+    if prune {
+        prune_note_images(&state.dir, &key, &content);
+    }
+    Ok(())
+}
+
+/// 保存粘贴/拖入的图片。请求体为图片原始字节，
+/// 请求头 `x-note-key` 为笔记编号、`x-ext` 为扩展名；返回 `<编号>/<文件名>`
+#[tauri::command]
+fn save_note_image(state: State<AppData>, request: tauri::ipc::Request) -> R<String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("参数无效".into());
+    };
+    let header = |k: &str| {
+        request
+            .headers()
+            .get(k)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+    };
+    let key = header("x-note-key");
+    check_note_key(&key)?;
+    let ext = match header("x-ext").as_str() {
+        "jpeg" => "jpg".to_string(),
+        e if NOTE_IMAGE_EXTS.contains(&e) => e.to_string(),
+        _ => return Err("不支持的图片格式".into()),
+    };
+    if bytes.is_empty() || bytes.len() > NOTE_IMAGE_MAX {
+        return Err("图片过大（上限 20 MB）".into());
+    }
+    let _g = guard(&state)?;
+    let img_dir = notes_dir(&state.dir).join(&key);
+    fs::create_dir_all(&img_dir).map_err(|e| format!("写入失败：{e}"))?;
+    let stem = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let mut name = format!("{stem}.{ext}");
+    let mut n = 2;
+    while img_dir.join(&name).exists() {
+        name = format!("{stem}-{n}.{ext}");
+        n += 1;
+    }
+    fs::write(img_dir.join(&name), bytes).map_err(|e| format!("写入失败：{e}"))?;
+    Ok(format!("{key}/{name}"))
 }
 
 #[tauri::command]
@@ -593,6 +888,32 @@ fn data_dir(state: State<AppData>) -> R<String> {
 
 #[tauri::command]
 fn open_data_dir(state: State<AppData>) -> R<()> {
+    spawn_opener(&state.dir.to_string_lossy());
+    Ok(())
+}
+
+/// 用系统默认浏览器打开笔记里的链接（仅 http/https/mailto）
+#[tauri::command]
+fn open_link(url: String) -> R<()> {
+    let lower = url.to_ascii_lowercase();
+    let ok = ["http://", "https://", "mailto:"].iter().any(|p| lower.starts_with(p))
+        && !url.chars().any(|c| c.is_whitespace() || c.is_control() || c == '"');
+    if !ok {
+        return Err("参数无效".into());
+    }
+    spawn_opener(&url);
+    Ok(())
+}
+
+/// 用系统默认看图程序打开笔记图片（`<编号>/<文件名>`）
+#[tauri::command]
+fn open_note_image(state: State<AppData>, rel: String) -> R<()> {
+    let path = note_image_path(&state.dir, &rel).ok_or("参数无效")?;
+    spawn_opener(&path.to_string_lossy());
+    Ok(())
+}
+
+fn spawn_opener(target: &str) {
     let opener = if cfg!(windows) {
         "explorer"
     } else if cfg!(target_os = "macos") {
@@ -600,8 +921,7 @@ fn open_data_dir(state: State<AppData>) -> R<()> {
     } else {
         "xdg-open"
     };
-    let _ = std::process::Command::new(opener).arg(&state.dir).spawn();
-    Ok(())
+    let _ = std::process::Command::new(opener).arg(target).spawn();
 }
 
 // ---------- 入口 ----------
@@ -690,6 +1010,28 @@ pub fn run() {
                 })
                 .build(),
         )
+        .register_uri_scheme_protocol(NOTE_SCHEME, |ctx, req| {
+            use tauri::http::{header::CONTENT_TYPE, Response, StatusCode};
+            let not_found = || {
+                Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Vec::new())
+                    .unwrap()
+            };
+            let Some(state) = ctx.app_handle().try_state::<AppData>() else {
+                return not_found();
+            };
+            let Some(path) = note_image_path(&state.dir, req.uri().path()) else {
+                return not_found();
+            };
+            match fs::read(&path) {
+                Ok(bytes) => Response::builder()
+                    .header(CONTENT_TYPE, image_mime(&path.to_string_lossy()))
+                    .body(bytes)
+                    .unwrap_or_else(|_| not_found()),
+                Err(_) => not_found(),
+            }
+        })
         .on_window_event(|w, e| {
             // 关闭按钮的行为由设置决定；`exit` 时放行关闭，应用随之退出
             if let WindowEvent::CloseRequested { api, .. } = e {
@@ -773,10 +1115,16 @@ pub fn run() {
             restore_task,
             delete_done,
             clear_done,
+            note_key,
+            read_note,
+            write_note,
+            save_note_image,
             get_settings,
             set_settings,
             data_dir,
-            open_data_dir
+            open_data_dir,
+            open_link,
+            open_note_image
         ])
         .run(tauri::generate_context!())
         .expect("tinyTD 启动失败");
@@ -941,6 +1289,7 @@ mod tests {
             font: " Foo; } <b> ".into(),
             font_size: 99,
             hotkey: " Ctrl+Alt+T ".into(),
+            auto_note: false,
         }
         .sanitized();
         assert_eq!(s.close_action, "minimize");
@@ -954,6 +1303,84 @@ mod tests {
         assert_eq!(d.theme, "light");
         assert_eq!(d.close_action, "minimize");
         assert_eq!(d.hotkey, DEFAULT_HOTKEY);
+        assert!(d.auto_note);
+    }
+
+    #[test]
+    fn note_marker_roundtrip() {
+        let line = "2026-11-25T16:09 对接支付回调 spent:130 note:mi2x8k0a mod:2026-11-26T09:00";
+        let l = parse_active_line(line);
+        assert_eq!(l.text, "对接支付回调");
+        assert_eq!(l.note.as_deref(), Some("mi2x8k0a"));
+        assert_eq!(l.spent, Some(130));
+        assert_eq!(l.to_line(), line);
+        // 编号不合法时不算标记，留在正文里
+        let l = parse_active_line("2026-11-25 看 note:../x 和 note:AB");
+        assert_eq!(l.text, "看 note:../x 和 note:AB");
+        assert_eq!(l.note, None);
+        // 已完成行
+        let done = format!("x 2026-11-27T10:00 {line}");
+        assert_eq!(note_of_line(&done, true).as_deref(), Some("mi2x8k0a"));
+        assert_eq!(note_of_line(line, false).as_deref(), Some("mi2x8k0a"));
+    }
+
+    #[test]
+    fn note_image_paths_are_confined() {
+        let dir = Path::new("data");
+        let ok = note_image_path(dir, "/mi2x8k0a%2F20261127-184012.png").unwrap();
+        assert_eq!(ok, dir.join("notes").join("mi2x8k0a").join("20261127-184012.png"));
+        assert!(note_image_path(dir, "/mi2x8k0a/20261127-184012-2.jpg").is_some());
+        for bad in [
+            "/mi2x8k0a%2F..%2F..%2Fsettings.json",
+            "/..%2Ftodo.txt",
+            "/mi2x8k0a/a.exe",
+            "/mi2x8k0a/sub/a.png",
+            "/MI2X8K0A/a.png",
+            "/mi2x8k0a",
+            "/",
+        ] {
+            assert!(note_image_path(dir, bad).is_none(), "{bad}");
+        }
+        assert_eq!(percent_decode("a%2Fb%zz%2"), "a/b%zz%2");
+    }
+
+    #[test]
+    fn note_keys_are_unique_and_valid() {
+        let dir = std::env::temp_dir().join(format!("tinytd-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(notes_dir(&dir)).unwrap();
+        let a = new_note_key(&dir);
+        assert!(valid_note_key(&a), "{a}");
+        fs::write(notes_dir(&dir).join(format!("{a}.md")), "x").unwrap();
+        let b = new_note_key(&dir);
+        assert!(valid_note_key(&b) && a != b);
+
+        // 清理不再引用的图片，引用中的保留
+        let img = notes_dir(&dir).join(&a);
+        fs::create_dir_all(&img).unwrap();
+        fs::write(img.join("1.png"), "").unwrap();
+        fs::write(img.join("2.png"), "").unwrap();
+        prune_note_images(&dir, &a, &format!("![]({a}/1.png)"));
+        assert!(img.join("1.png").exists() && !img.join("2.png").exists());
+        prune_note_images(&dir, &a, "");
+        assert!(!img.exists());
+        remove_note(&dir, &a);
+        assert!(!notes_dir(&dir).join(format!("{a}.md")).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn locate_line_by_identity() {
+        let lines: Vec<String> = vec![
+            "2026-11-25T10:00 写周报".into(),
+            "2026-11-25T11:00 对接支付回调 spent:5".into(),
+        ];
+        assert_eq!(locate_line(&lines, false, 1, "2026-11-25T11:00", "对接支付回调"), Some(1));
+        // 行序变了：按创建时间 + 文本找回
+        assert_eq!(locate_line(&lines, false, 0, "2026-11-25T11:00", "对接支付回调"), Some(1));
+        assert_eq!(locate_line(&lines, false, 0, "2026-11-25T11:00", "别的任务"), None);
+        let done: Vec<String> = vec!["x 2026-11-27T10:00 2026-11-25T10:00 写周报 spent:3".into()];
+        assert_eq!(locate_line(&done, true, 5, "2026-11-25T10:00", "写周报"), Some(0));
     }
 
     #[test]
