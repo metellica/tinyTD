@@ -6,6 +6,24 @@
 
 为快节奏的 AI 工作流设计的极简任务速记本：打开即输入，回车即记录。不搞复杂的时间提醒，只为「快记、快清、可回看」。
 
+<table>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/zh-list.png" alt="任务列表"></td>
+    <td width="33%"><img src="docs/screenshots/zh-card.png" alt="展开任务写笔记"></td>
+    <td width="33%"><img src="docs/screenshots/zh-done-dark.png" alt="已完成列表（深色）"></td>
+  </tr>
+  <tr>
+    <td>进行中的任务置顶计时，暂停累计用时，<code>+项目</code> 一键筛选</td>
+    <td>点击任务就地展开：改标题、写笔记，暂停时自动插入分隔线</td>
+    <td>已完成列表记录实际用时；支持深色模式</td>
+  </tr>
+  <tr>
+    <td colspan="3"><img src="docs/screenshots/zh-note-window.png" alt="独立笔记窗口"><br>独立笔记窗口：代码块、截图都能放，可以摆在 IDE 旁边对照</td>
+  </tr>
+</table>
+
+> 截图使用的是测试数据。
+
 ## 适用场景
 
 - ✅ **适合**：在一台主力电脑上边工作边随手记下要做的事，做完就清，偶尔回看。任务存在时间短，通常是当天或本周的事。
@@ -142,6 +160,7 @@ tinyTD/
 │     ├─ lib.rs            todo.txt 解析 + invoke 命令 + 单元测试
 │     └─ main.rs           入口
 ├─ .github/workflows/      CI 与发布
+├─ docs/screenshots/       README 截图
 ├─ scripts/make_icons.py   用 Pillow 生成图标
 └─ README.md / README.zh-CN.md
 ```

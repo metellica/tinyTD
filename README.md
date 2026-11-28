@@ -6,6 +6,24 @@
 
 A minimal task notepad for fast-paced AI workflows: open it, type, press Enter. No reminders or scheduling, just quick capture, quick cleanup and easy review.
 
+<table>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/en-list.png" alt="Task list"></td>
+    <td width="33%"><img src="docs/screenshots/en-card.png" alt="Expanded task with notes"></td>
+    <td width="33%"><img src="docs/screenshots/en-done-dark.png" alt="Done list (dark)"></td>
+  </tr>
+  <tr>
+    <td>The task in progress is pinned with a live timer, paused time accumulates, filter by <code>+project</code> in one click</td>
+    <td>Click a task to expand it in place: edit the title and write notes; pausing inserts a divider</td>
+    <td>The done list records the actual time spent; dark mode included</td>
+  </tr>
+  <tr>
+    <td colspan="3"><img src="docs/screenshots/en-note-window.png" alt="Note window"><br>Note window: code blocks and screenshots, keep it next to your IDE</td>
+  </tr>
+</table>
+
+> Screenshots use test data.
+
 ## Who it's for
 
 - ✅ **Good fit**: jotting down what to do while you work on one main computer, clearing it when done, looking back now and then. Tasks are short-lived, usually for today or this week.
@@ -142,6 +160,7 @@ tinyTD/
 │     ├─ lib.rs            todo.txt parsing + invoke commands + unit tests
 │     └─ main.rs           Entry point
 ├─ .github/workflows/      CI and release
+├─ docs/screenshots/       README screenshots
 ├─ scripts/make_icons.py   Generates icons with Pillow
 └─ README.md / README.zh-CN.md
 ```
