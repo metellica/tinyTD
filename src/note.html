@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>tinyTD</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app" class="note-page">
+    <main id="note-scroll" class="note-scroll">
+      <div class="note-doc">
+        <h1 id="note-title" class="note-doc-title"></h1>
+        <div id="note-editor" contenteditable="true" spellcheck="false"></div>
+      </div>
+    </main>
+    <div class="note-hint" data-i18n="noteHint"></div>
+  </div>
+  <div id="toast" hidden></div>
+  <script src="i18n.js"></script>
+  <script src="md.js"></script>
+  <script src="editor.js"></script>
+  <script src="note.js"></script>
+</body>
+</html>

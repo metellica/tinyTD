@@ -21,6 +21,7 @@ Grab the installer for your platform from the [Releases](https://github.com/mete
 | Start / pause | Click the circle at the start of the row: ○ to do → ◉ in progress (highlighted, pinned to the top, live timer) → ⏸ paused (time accumulates) → click again to resume; pausing within 1 minute counts as a misclick and returns it to a plain to-do |
 | Complete | `Shift` + click the circle; the task moves to "Done" with the actual time spent. Hold `Shift` while hovering the circle to preview ✓ |
 | Edit / notes | Click a task (anywhere except the circle and row buttons) to expand it in place into a card: edit the title directly (`Enter` jumps to the notes, the modified time is recorded) and write notes below it: rich text, paste or drop screenshots, auto-saved. `⤢` switches to full screen. Click `⌃`, click outside or press `Esc` to collapse. Only one card is open at a time; tasks with notes show a faint `≡` mark |
+| Long notes / code / screenshots | Click `⧉` on the card or full-screen page to open the note in its own window: resize it freely, put it next to your IDE; the size is remembered. One window per note; clicking the task again switches to it, and pause dividers go there too. Type ` ``` ` (optionally with a language, e.g. ` ```js `) at the start of a line, then space or `Enter`, for a code block: no wrapping, `Enter` keeps indentation, `Tab` indents, `Ctrl+Enter` leaves it; multi-line code pasted from VS Code and similar editors becomes a code block automatically. Hover a code block to "Copy"; in the small window code longer than 10 lines is folded, click to expand. Click an image to view it in-app: wheel to zoom, drag to pan, `←` / `→` to switch, double-click toggles fit / actual size, `Esc` closes |
 | Pause / resume notes | Pausing expands the card with a `⏸ time` divider so you can jot down where you stopped (just click elsewhere to skip, nothing is kept); resuming a task with notes expands them so you can pick up the context (can be turned off in Settings) |
 | Delete | Click `✕` at the end of the row, then click again to confirm |
 | Reorder | Drag the `⠿` handle; drop on empty space to move to the end |
@@ -103,10 +104,13 @@ During development run `cargo test` (unit tests for todo.txt parsing and setting
 ```text
 tinyTD/
 ├─ src/                    Frontend (no framework, embedded in the binary)
-│  ├─ index.html
+│  ├─ index.html           Main window
+│  ├─ note.html            Standalone note window (note.js)
 │  ├─ style.css
 │  ├─ i18n.js              Chinese / English UI strings
 │  ├─ md.js                Markdown subset ⇄ note editor HTML
+│  ├─ editor.js            Note editor shared by both windows (paste, images, code blocks, image viewer)
+│  ├─ note.js
 │  └─ app.js
 ├─ src-tauri/
 │  ├─ tauri.conf.json      Tauri 2 config (window / assets / icons)

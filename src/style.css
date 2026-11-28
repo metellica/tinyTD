@@ -750,6 +750,8 @@ select option { background: var(--bg); color: var(--text); }
 .card-note::-webkit-scrollbar { width: 6px; }
 .card-note::-webkit-scrollbar-thumb { background: var(--surface-2); border-radius: 6px; }
 .card-note #note-editor { min-height: 1.7em; font-size: var(--fs); }
+/* 卡片里的图片按缩略图显示，点开看大图 */
+.card-note #note-editor img { max-height: 180px; }
 
 /* 有笔记的小标记 */
 .note-mark { display: flex; align-items: center; height: 22px; color: var(--muted); opacity: 0.75; flex: none; }
@@ -792,7 +794,35 @@ select option { background: var(--bg); color: var(--text); }
   border-radius: 4px;
 }
 #note-editor code { padding: 1px 4px; }
-#note-editor pre { padding: 8px 10px; margin: 4px 0; white-space: pre-wrap; }
+/* 代码块：不自动换行，横向滚动，保留缩进 */
+#note-editor pre {
+  position: relative;
+  padding: 8px 10px;
+  margin: 4px 0;
+  line-height: 1.55;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  overflow-x: auto;
+  tab-size: 4;
+}
+#note-editor pre::-webkit-scrollbar { height: 6px; }
+#note-editor pre::-webkit-scrollbar-thumb { background: var(--surface-2); border-radius: 6px; }
+/* 长代码默认折叠（小窗），点进去或点「展开」恢复 */
+#note-editor pre.fold { max-height: calc(1.55em * 10 + 16px); overflow: hidden; cursor: pointer; }
+#note-editor pre.fold::after {
+  content: attr(data-more);
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 22px 10px 6px;
+  text-align: center;
+  font-family: var(--font);
+  font-size: calc(var(--fs) - 2px);
+  color: var(--accent);
+  background: linear-gradient(to bottom, transparent, var(--surface) 65%);
+}
 #note-editor a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 #note-editor img {
   display: block;
@@ -820,6 +850,108 @@ select option { background: var(--bg); color: var(--text); }
   line-height: 1.5;
   color: var(--muted);
 }
+
+/* 代码块右上角的浮动工具条 */
+.code-tools {
+  position: fixed;
+  z-index: 45;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--hairline-strong), 0 2px 6px rgba(20, 24, 40, 0.08);
+}
+.code-tools button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--sub);
+  font-size: calc(var(--fs) - 2px);
+  cursor: pointer;
+}
+.code-tools button:hover { background: var(--surface-2); color: var(--text); }
+.code-tools .i { width: 12px; height: 12px; }
+
+/* 图片查看器 */
+.viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  overflow: hidden;
+  background: rgba(10, 11, 14, 0.9);
+  cursor: grab;
+  touch-action: none;
+  animation: fade-in 0.15s ease-out;
+}
+.viewer.dragging { cursor: grabbing; }
+@keyframes fade-in { from { opacity: 0; } }
+.viewer-img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  max-width: none;
+  transform-origin: 0 0;
+  border-radius: 4px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+  user-select: none;
+}
+.viewer-bar {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #e8e9ed;
+}
+.viewer-count { padding: 0 8px; font-size: calc(var(--fs) - 1px); font-variant-numeric: tabular-nums; }
+.viewer-count:empty { display: none; }
+.viewer-btn, .viewer-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  min-width: 28px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: #e8e9ed;
+  cursor: pointer;
+}
+.viewer-btn:hover, .viewer-nav:hover { background: rgba(255, 255, 255, 0.16); }
+.viewer-nav { position: absolute; top: 50%; height: 44px; min-width: 34px; transform: translateY(-50%); background: rgba(0, 0, 0, 0.4); }
+.viewer-nav.prev { left: 10px; }
+.viewer-nav.next { right: 10px; }
+.viewer .i { width: 16px; height: 16px; }
+
+/* ---------- 独立笔记窗口 ---------- */
+
+.note-page { display: flex; flex-direction: column; }
+.note-scroll { flex: 1; overflow-y: auto; cursor: text; }
+.note-scroll::-webkit-scrollbar { width: 10px; }
+.note-scroll::-webkit-scrollbar-thumb { background: var(--surface-2); border: 2px solid var(--bg); border-radius: 8px; }
+.note-doc { max-width: 960px; margin: 0 auto; padding: 22px 32px 48px; }
+.note-doc-title {
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: calc(var(--fs) + 7px);
+  font-weight: 650;
+  line-height: 1.4;
+  word-break: break-word;
+  user-select: text;
+  cursor: auto;
+}
+.note-page #note-editor { min-height: 50vh; }
 
 /* 低于 150% 缩放时 1.5px 边框会被取整成 1px，细圆环发虚；这时改为 2px（高分屏保持 1.5px） */
 @media (max-resolution: 1.49dppx) {

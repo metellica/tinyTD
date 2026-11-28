@@ -16,7 +16,9 @@ use std::sync::{Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, State, Theme, Wry, WindowEvent};
+use tauri::{
+    AppHandle, Emitter, Manager, State, Theme, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent, Wry,
+};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 const DEFAULT_HOTKEY: &str = "Ctrl+K";
@@ -126,15 +128,18 @@ fn tray_labels(lang: &str, hotkey: &str) -> (String, &'static str) {
     }
 }
 
+fn window_theme(s: &Settings) -> Option<Theme> {
+    match s.theme.as_str() {
+        "dark" => Some(Theme::Dark),
+        "light" => Some(Theme::Light),
+        _ => None,
+    }
+}
+
 /// 把设置中需要原生层配合的部分（窗口标题栏主题、托盘文字）应用出去
 fn apply_native(app: &AppHandle, s: &Settings) {
-    if let Some(w) = app.get_webview_window("main") {
-        let theme = match s.theme.as_str() {
-            "dark" => Some(Theme::Dark),
-            "light" => Some(Theme::Light),
-            _ => None,
-        };
-        let _ = w.set_theme(theme);
+    for w in app.webview_windows().values() {
+        let _ = w.set_theme(window_theme(s));
     }
     if let Some(items) = app.try_state::<TrayItems>() {
         let (show, quit) = tray_labels(&s.lang, &s.hotkey);
@@ -496,6 +501,28 @@ fn remove_note(dir: &Path, key: &str) {
     let _ = fs::remove_dir_all(nd.join(key));
 }
 
+/// 笔记是否仍归某个待办 / 已完成任务所有（任务删掉后不再接受写入，免得留下孤儿文件）
+fn note_referenced(dir: &Path, key: &str) -> bool {
+    let has = |file: &str, done: bool| {
+        read_lines(&dir.join(file))
+            .iter()
+            .any(|l| note_of_line(l, done).as_deref() == Some(key))
+    };
+    has(TODO_FILE, false) || has(DONE_FILE, true)
+}
+
+fn note_window_label(key: &str) -> String {
+    format!("note-{key}")
+}
+
+/// 笔记随任务被删除：通知它的独立窗口关闭
+fn notify_note_deleted(app: &AppHandle, key: &str) {
+    let label = note_window_label(key);
+    if app.get_webview_window(&label).is_some() {
+        let _ = app.emit_to(label.as_str(), "note-deleted", key);
+    }
+}
+
 /// 从一行待办（`done = false`）或已完成（`done = true`）里取出笔记编号
 fn note_of_line(line: &str, done: bool) -> Option<String> {
     if done {
@@ -648,7 +675,7 @@ fn set_status(state: State<AppData>, id: usize, status: String) -> R<()> {
 }
 
 #[tauri::command]
-fn remove_task(state: State<AppData>, id: usize) -> R<()> {
+fn remove_task(app: AppHandle, state: State<AppData>, id: usize) -> R<()> {
     let _g = guard(&state)?;
     let path = state.dir.join(TODO_FILE);
     let mut lines = read_lines(&path);
@@ -659,6 +686,7 @@ fn remove_task(state: State<AppData>, id: usize) -> R<()> {
     write_lines(&path, &lines)?;
     if let Some(key) = note_of_line(&line, false) {
         remove_note(&state.dir, &key);
+        notify_note_deleted(&app, &key);
     }
     Ok(())
 }
@@ -724,7 +752,7 @@ fn restore_task(state: State<AppData>, id: usize) -> R<()> {
 }
 
 #[tauri::command]
-fn delete_done(state: State<AppData>, id: usize) -> R<()> {
+fn delete_done(app: AppHandle, state: State<AppData>, id: usize) -> R<()> {
     let _g = guard(&state)?;
     let path = state.dir.join(DONE_FILE);
     let mut lines = read_lines(&path);
@@ -735,19 +763,21 @@ fn delete_done(state: State<AppData>, id: usize) -> R<()> {
     write_lines(&path, &lines)?;
     if let Some(key) = note_of_line(&line, true) {
         remove_note(&state.dir, &key);
+        notify_note_deleted(&app, &key);
     }
     Ok(())
 }
 
 /// 清空已完成；给了 `project` 时只清掉带该项目标记的
 #[tauri::command]
-fn clear_done(state: State<AppData>, project: Option<String>) -> R<()> {
+fn clear_done(app: AppHandle, state: State<AppData>, project: Option<String>) -> R<()> {
     let _g = guard(&state)?;
     let path = state.dir.join(DONE_FILE);
     let (removed, kept) = split_by_project(read_lines(&path), project.as_deref());
     write_lines(&path, &kept)?;
     for key in removed.iter().filter_map(|l| note_of_line(l, true)) {
         remove_note(&state.dir, &key);
+        notify_note_deleted(&app, &key);
     }
     Ok(())
 }
@@ -823,13 +853,24 @@ fn read_note(state: State<AppData>, key: String) -> R<String> {
     Ok(fs::read_to_string(notes_dir(&state.dir).join(format!("{key}.md"))).unwrap_or_default())
 }
 
-/// 保存笔记正文；内容为空则删除文件。`prune` 时顺带清理不再引用的图片（关闭笔记时）
+/// 保存笔记正文；内容为空则删除文件。`prune` 时顺带清理不再引用的图片（关闭笔记时）。
+/// 独立笔记窗口保存后若「有没有笔记」变了，通知主窗口刷新列表上的标记
 #[tauri::command]
-fn write_note(state: State<AppData>, key: String, content: String, prune: bool) -> R<()> {
+fn write_note(
+    window: WebviewWindow,
+    state: State<AppData>,
+    key: String,
+    content: String,
+    prune: bool,
+) -> R<()> {
     check_note_key(&key)?;
     let _g = guard(&state)?;
+    if !note_referenced(&state.dir, &key) {
+        return Err("笔记所属的任务已被删除".into());
+    }
     let nd = notes_dir(&state.dir);
     let file = nd.join(format!("{key}.md"));
+    let existed = file.is_file();
     if content.trim().is_empty() {
         let _ = fs::remove_file(&file);
     } else {
@@ -840,6 +881,9 @@ fn write_note(state: State<AppData>, key: String, content: String, prune: bool) 
     }
     if prune {
         prune_note_images(&state.dir, &key, &content);
+    }
+    if window.label() != "main" && existed != file.is_file() {
+        let _ = window.emit_to("main", "note-saved", &key);
     }
     Ok(())
 }
@@ -870,6 +914,9 @@ fn save_note_image(state: State<AppData>, request: tauri::ipc::Request) -> R<Str
         return Err("图片过大（上限 20 MB）".into());
     }
     let _g = guard(&state)?;
+    if !note_referenced(&state.dir, &key) {
+        return Err("笔记所属的任务已被删除".into());
+    }
     let img_dir = notes_dir(&state.dir).join(&key);
     fs::create_dir_all(&img_dir).map_err(|e| format!("写入失败：{e}"))?;
     let stem = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
@@ -909,6 +956,8 @@ fn set_settings(app: AppHandle, state: State<AppData>, settings: Settings) -> R<
     fs::write(state.dir.join(SETTINGS_FILE), json).map_err(|e| format!("写入失败：{e}"))?;
     *state.settings.lock().map_err(|_| "内部锁异常".to_string())? = s.clone();
     apply_native(&app, &s);
+    // 独立笔记窗口跟着换主题 / 字体 / 语言
+    let _ = app.emit("settings-changed", &s);
     Ok(s)
 }
 
@@ -942,6 +991,60 @@ fn open_note_image(state: State<AppData>, rel: String) -> R<()> {
     let path = note_image_path(&state.dir, &rel).ok_or("参数无效")?;
     spawn_opener(&path.to_string_lossy());
     Ok(())
+}
+
+/// 在独立窗口打开笔记（每篇笔记一个窗口，已打开则切过去）。
+/// 创建窗口须在异步命令里进行，否则 Windows 上会卡死
+#[tauri::command]
+async fn open_note_window(
+    app: AppHandle,
+    state: State<'_, AppData>,
+    key: String,
+    title: String,
+    width: f64,
+    height: f64,
+) -> R<()> {
+    check_note_key(&key)?;
+    if focus_note_window(app.clone(), key.clone(), false) {
+        return Ok(());
+    }
+    let theme = state
+        .settings
+        .lock()
+        .map(|s| window_theme(&s))
+        .map_err(|_| "内部锁异常".to_string())?;
+    let title: String = title.chars().filter(|c| !c.is_control()).take(80).collect();
+    let init = format!(
+        "window.__TINYTD_NOTE__ = {};",
+        serde_json::json!({ "key": key, "title": title })
+    );
+    let clamp = |v: f64, min: f64, max: f64| if v.is_finite() { v.clamp(min, max) } else { min };
+    WebviewWindowBuilder::new(&app, note_window_label(&key), WebviewUrl::App("note.html".into()))
+        .title(format!("{title} · tinyTD"))
+        .inner_size(clamp(width, 420.0, 4000.0), clamp(height, 360.0, 3000.0))
+        .min_inner_size(360.0, 300.0)
+        .theme(theme)
+        .disable_drag_drop_handler()
+        .initialization_script(&init)
+        .build()
+        .map_err(|e| format!("打开窗口失败：{e}"))?;
+    Ok(())
+}
+
+/// 笔记已在独立窗口打开时切过去并返回 true；`stamp` 时让它在顶部插入暂停分隔
+#[tauri::command]
+fn focus_note_window(app: AppHandle, key: String, stamp: bool) -> bool {
+    let label = note_window_label(&key);
+    let Some(w) = app.get_webview_window(&label) else {
+        return false;
+    };
+    let _ = w.unminimize();
+    let _ = w.show();
+    let _ = w.set_focus();
+    if stamp {
+        let _ = app.emit_to(label.as_str(), "note-stamp", &key);
+    }
+    true
 }
 
 fn spawn_opener(target: &str) {
@@ -1064,11 +1167,16 @@ pub fn run() {
             }
         })
         .on_window_event(|w, e| {
-            // 关闭按钮的行为由设置决定；`exit` 时放行关闭，应用随之退出
+            // 主窗口关闭按钮的行为由设置决定；`exit` 时连同独立笔记窗口一起退出
             if let WindowEvent::CloseRequested { api, .. } = e {
+                if w.label() != "main" {
+                    return;
+                }
                 let app = w.app_handle();
-                if close_action(app) != "exit" {
-                    api.prevent_close();
+                api.prevent_close();
+                if close_action(app) == "exit" {
+                    app.exit(0);
+                } else {
                     dismiss_main(app);
                 }
             }
@@ -1155,7 +1263,9 @@ pub fn run() {
             data_dir,
             open_data_dir,
             open_link,
-            open_note_image
+            open_note_image,
+            open_note_window,
+            focus_note_window
         ])
         .run(tauri::generate_context!())
         .expect("tinyTD 启动失败");
@@ -1422,6 +1532,22 @@ mod tests {
         assert!(!img.exists());
         remove_note(&dir, &a);
         assert!(!notes_dir(&dir).join(format!("{a}.md")).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn note_reference_follows_task_lines() {
+        let dir = std::env::temp_dir().join(format!("tinytd-ref-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(TODO_FILE), "2026-11-25T10:00 写周报 note:abcd\n").unwrap();
+        fs::write(dir.join(DONE_FILE), "x 2026-11-27T10:00 2026-11-25T09:00 对接 note:ef01\n").unwrap();
+        assert!(note_referenced(&dir, "abcd"));
+        assert!(note_referenced(&dir, "ef01"));
+        // 任务删掉后，笔记不再算有主
+        fs::write(dir.join(TODO_FILE), "").unwrap();
+        assert!(!note_referenced(&dir, "abcd"));
+        assert!(!note_referenced(&dir, "zzzz"));
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -1,6 +1,6 @@
 // 任务笔记：受限 Markdown 子集 ⇄ 编辑器 HTML（无第三方依赖）
 //
-// 支持：# / ## / ### 标题、- 无序列表、1. 有序列表、``` 代码块、
+// 支持：# / ## / ### 标题、- 无序列表、1. 有序列表、``` 代码块（可带语言）、
 //       **粗体**、*斜体*、~~删除线~~、`代码`、[文字](链接)、![](图片)、裸链接
 // 编辑器里每一行对应文件里的一行；其他格式（颜色、字号、表格样式等）一律丢弃。
 const MD = (() => {
@@ -12,6 +12,7 @@ const MD = (() => {
   const PUNCT = /[!-/:-@[-`{-~]/;
   const BARE_URL = /^https?:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}，。；：！？、）】」』]/;
   const STAMP = /^⏸/;
+  const LANG = /^[\w+#.-]{0,20}$/; // 代码块语言标记，如 ```js
 
   // 找到 from 之后第一个未被反斜杠转义的 token
   function findClose(s, token, from) {
@@ -94,11 +95,12 @@ const MD = (() => {
     for (let k = 0; k < lines.length; k++) {
       const line = lines[k];
       let m;
-      if (/^```/.test(line)) {
+      if ((m = /^```\s*(\S*)/.exec(line))) {
         closeList();
         const buf = [];
         for (k++; k < lines.length && !/^```\s*$/.test(lines[k]); k++) buf.push(lines[k]);
-        html += `<pre>${esc(buf.join('\n')) || '<br>'}</pre>`;
+        const lang = LANG.test(m[1]) ? m[1] : '';
+        html += `<pre${lang ? ` data-lang="${esc(lang)}"` : ''}>${esc(buf.join('\n')) || '<br>'}</pre>`;
       } else if ((m = /^(#{1,3})\s+(.*)$/.exec(line))) {
         closeList();
         const n = m[1].length;
@@ -227,7 +229,8 @@ const MD = (() => {
           list(n);
         } else if (tag === 'PRE') {
           const text = (n.innerText ?? n.textContent).replace(/\u00a0/g, ' ').replace(/\n$/, '');
-          lines.push('```', ...text.split('\n').map((l) => (/^```/.test(l) ? ` ${l}` : l)), '```');
+          const lang = LANG.test(n.dataset?.lang || '') ? n.dataset.lang || '' : '';
+          lines.push(`\`\`\`${lang}`, ...text.split('\n').map((l) => (/^```/.test(l) ? ` ${l}` : l)), '```');
         } else if (tag === 'HR') {
           lines.push('');
         } else {

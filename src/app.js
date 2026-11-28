@@ -50,6 +50,7 @@ const els = {
   setAutoNote: $('set-auto-note'),
   note: $('note'),
   noteClose: $('btn-note-close'),
+  notePop: $('btn-note-pop'),
   noteTitle: $('note-title'),
   noteMeta: $('note-meta'),
   noteEditor: $('note-editor'),
@@ -65,6 +66,7 @@ const ICONS = {
   notes: '<path d="M6 7h12M6 12h12M6 17h7"/>',
   expand: '<path d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5"/>',
   collapse: '<path d="M6 15l6-6 6 6"/>',
+  popout: '<path d="M14 4h6v6"/><path d="M20 4l-8 8"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
   inbox: '<path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5.5 5h13L21 13v5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18v-5z"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
 };
@@ -401,7 +403,7 @@ function noteMark() {
   return mark;
 }
 
-// 卡片底部：笔记编辑区（编辑器节点在渲染后挂进来）+ 全屏、收起按钮
+// 卡片底部：笔记编辑区（编辑器节点在渲染后挂进来）+ 全屏、新窗口、收起按钮
 function cardParts(row, body) {
   const host = document.createElement('div');
   host.className = 'card-note';
@@ -416,6 +418,9 @@ function cardParts(row, body) {
   const full = actionBtn(tr('fullscreen'), 'expand');
   full.addEventListener('click', () => setCardFull(true));
   row.appendChild(full);
+  const pop = actionBtn(tr('popout'), 'popout');
+  pop.addEventListener('click', popOutCard);
+  row.appendChild(pop);
   const fold = actionBtn(tr('collapse'), 'collapse');
   fold.addEventListener('click', () => closeCard());
   row.appendChild(fold);
@@ -661,8 +666,8 @@ els.dir.addEventListener('click', () => {
 // 单击条目就地展开成卡片：标题可直接修改，下面是笔记（富文本，可贴图）。
 // 同一时间只展开一张；笔记编辑器只有一个 DOM 节点，在卡片与全屏面板之间移动。
 
-const noteSrc = (rel) => window.__TAURI__?.core?.convertFileSrc?.(rel, 'tdnote') ?? rel;
-const IMG_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
+const { noteSrc, placeCaret, placeholderLine } = NoteEditor;
+const NOTE_WIN_KEY = 'tinytd.noteWin'; // 独立笔记窗口上次的尺寸
 
 let card = null; // 当前展开的卡片
 let cardOpening = false;
@@ -681,27 +686,6 @@ function findTask(scope, ref) {
   return list.find((x) => sameTask(x, ref)) || (ref.key && list.find((x) => x.note === ref.key)) || null;
 }
 
-function localTs(d = new Date()) {
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-function placeCaret(node, atEnd = false) {
-  const r = document.createRange();
-  r.selectNodeContents(node);
-  r.collapse(!atEnd);
-  const sel = getSelection();
-  sel.removeAllRanges();
-  sel.addRange(r);
-}
-
-function placeholderLine() {
-  const line = document.createElement('div');
-  line.className = 'ph';
-  line.setAttribute('placeholder', tr('notePlaceholder'));
-  line.appendChild(document.createElement('br'));
-  return line;
-}
 
 /* 卡片标题：直接修改；Enter 跳到笔记，Esc 放弃修改并收起 */
 function titleInput(t) {
@@ -795,6 +779,8 @@ async function openCard(scope, t, { focus = 'note', stamp = false } = {}) {
     await noteQueue; // 等上一张卡片保存完、列表刷新完
     t = findTask(scope, t);
     if (!t) return;
+    // 这篇笔记已在独立窗口打开：切过去，不在这里再开一份
+    if (t.note && (await invoke('focus_note_window', { key: t.note, stamp }).catch(() => false))) return;
     let md = '';
     if (t.note && t.has_note) {
       try {
@@ -807,6 +793,7 @@ async function openCard(scope, t, { focus = 'note', stamp = false } = {}) {
     const ed = els.noteEditor;
     if (md.trim()) ed.innerHTML = MD.toHtml(md, noteSrc);
     else ed.replaceChildren(placeholderLine());
+    NoteEditor.decorate(ed, true);
     card = {
       scope,
       id: t.id,
@@ -845,30 +832,8 @@ function focusCard(focus, stamp) {
 }
 
 // 暂停时在顶部插入「⏸ 时间」分隔和一个空行
-function insertStamp(c) {
-  dropEmptyStamp(c);
-  const ed = els.noteEditor;
-  if (ed.childNodes.length === 1 && ed.firstChild.classList?.contains('ph')) ed.replaceChildren();
-  c.orig = new Set(ed.childNodes);
-  const h = document.createElement('h3');
-  h.className = 'stamp';
-  h.textContent = `⏸ ${localTs()}`;
-  ed.prepend(h, placeholderLine());
-  c.stamp = h;
-}
-
-// 分隔下面什么都没写，就把分隔撤掉
-function dropEmptyStamp(c) {
-  const h = c.stamp;
-  c.stamp = null;
-  if (!h || !h.isConnected) return;
-  const added = [];
-  for (let n = h.nextSibling; n && !c.orig.has(n); n = n.nextSibling) added.push(n);
-  const hasContent = (n) => n.textContent.trim() || n.nodeName === 'IMG' || n.querySelector?.('img');
-  if (added.some(hasContent)) return;
-  [h, ...added].forEach((n) => n.remove());
-  if (c.touched) c.dirty = true;
-}
+const insertStamp = (c) => NoteEditor.insertStamp(els.noteEditor, c);
+const dropEmptyStamp = (c) => NoteEditor.dropEmptyStamp(c);
 
 function scheduleNoteSave(c) {
   clearTimeout(c.timer);
@@ -917,6 +882,28 @@ function closeCard() {
 
 function closeCardOf(scope, t) {
   if (isCardOf(scope, t)) closeCard();
+}
+
+/** 在独立窗口打开当前卡片的笔记（可调大小，适合长代码、截图）；主窗口里的卡片随即收起 */
+function popOutCard() {
+  const c = card;
+  if (!c) return;
+  closeCard();
+  // 整个过程排进 noteQueue：窗口建好、列表拿到笔记编号之前，openCard 会等着，
+  // 不会在主窗口再展开同一篇；新窗口读到的也是卡片最后一次保存的内容
+  noteQueue = noteQueue.then(async () => {
+    try {
+      c.key = c.key || (await invoke('note_key', { scope: c.scope, id: c.id, created: c.created, text: c.text }));
+      let size = null;
+      try {
+        size = JSON.parse(localStorage.getItem(NOTE_WIN_KEY));
+      } catch {}
+      await invoke('open_note_window', { key: c.key, title: c.text, width: size?.w || 760, height: size?.h || 640 });
+    } catch (e) {
+      toast(tErr(e), true);
+    }
+    await refresh().catch(() => {});
+  });
 }
 
 /* 全屏：长笔记、看图时用；返回后仍是展开的卡片 */
@@ -973,144 +960,36 @@ function reconcileCard() {
   card.key = card.key || t.note || null;
 }
 
-/* 图片：粘贴 / 拖入后存到 notes/<编号>/，正文里只记相对路径 */
-async function imageBytes(file) {
-  const ext = IMG_EXT[file.type];
-  if (ext) return { ext, bytes: new Uint8Array(await file.arrayBuffer()) };
-  // 其他格式（如 bmp / tiff）转成 png
-  const bmp = await createImageBitmap(file);
-  const canvas = document.createElement('canvas');
-  canvas.width = bmp.width;
-  canvas.height = bmp.height;
-  canvas.getContext('2d').drawImage(bmp, 0, 0);
-  const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/png'));
-  return { ext: 'png', bytes: new Uint8Array(await blob.arrayBuffer()) };
-}
-
-async function insertImages(files) {
-  const c = card;
-  if (!c) return;
-  const sel = getSelection();
-  const range = sel.rangeCount && els.noteEditor.contains(sel.anchorNode) ? sel.getRangeAt(0).cloneRange() : null;
-  try {
-    if (!c.key) {
-      await noteQueue;
-      c.key = c.key || (await invoke('note_key', { scope: c.scope, id: c.id, created: c.created, text: c.text }));
-    }
-    let html = '';
-    for (const f of files) {
-      const { ext, bytes } = await imageBytes(f);
-      const rel = await invoke('save_note_image', bytes, { headers: { 'x-note-key': c.key, 'x-ext': ext } });
-      html += `<img src="${noteSrc(rel)}" data-src="${rel}" alt="">`;
-    }
-    if (card !== c) return;
-    els.noteEditor.focus();
-    if (range) {
-      sel.removeAllRanges();
-      sel.addRange(range);
-    } else {
-      placeCaret(els.noteEditor, true);
-    }
-    document.execCommand('insertHTML', false, html);
-  } catch (e) {
-    toast(tErr(e), true);
+/** 确保卡片有笔记编号（第一次插图 / 弹出窗口时申请） */
+async function ensureCardKey(c) {
+  if (!c.key) {
+    await noteQueue;
+    c.key = c.key || (await invoke('note_key', { scope: c.scope, id: c.id, created: c.created, text: c.text }));
   }
-}
-
-const imageFiles = (list) => [...list].filter((f) => f && f.type.startsWith('image/'));
-
-// 行首输入 - / 1. / # 再按空格：转成列表或标题
-function autoFormat(e) {
-  const ed = els.noteEditor;
-  const sel = getSelection();
-  if (!sel.rangeCount || !sel.isCollapsed) return;
-  const r = sel.getRangeAt(0);
-  let blk = r.startContainer;
-  while (blk && blk !== ed && !(blk.parentNode === ed && /^(DIV|P)$/.test(blk.nodeName))) blk = blk.parentNode;
-  if (!blk || blk === ed) return;
-  const head = document.createRange();
-  head.setStart(blk, 0);
-  head.setEnd(r.startContainer, r.startOffset);
-  const s = head.toString();
-  let cmd;
-  let val;
-  if (/^[-*+]$/.test(s)) cmd = 'insertUnorderedList';
-  else if (/^1[.)]$/.test(s)) cmd = 'insertOrderedList';
-  else if (/^#{1,3}$/.test(s)) [cmd, val] = ['formatBlock', `h${s.length}`];
-  else return;
-  e.preventDefault();
-  sel.removeAllRanges();
-  sel.addRange(head);
-  document.execCommand('delete');
-  document.execCommand(cmd, false, val);
+  return c.key;
 }
 
 (() => {
-  const ed = els.noteEditor;
-  document.execCommand('defaultParagraphSeparator', false, 'div');
-  ed.addEventListener('input', () => {
-    const c = card;
-    if (!c) return;
-    ed.querySelectorAll('.ph').forEach((n) => n.classList.remove('ph'));
-    c.dirty = c.touched = true;
-    scheduleNoteSave(c);
-  });
-  ed.addEventListener('keydown', (e) => {
-    if (e.key === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) autoFormat(e);
-  });
-  ed.addEventListener('paste', (e) => {
-    const cd = e.clipboardData;
-    if (!cd) return;
-    e.preventDefault();
-    const files = imageFiles([...cd.items].filter((i) => i.kind === 'file').map((i) => i.getAsFile()));
-    if (files.length) return void insertImages(files);
-    const html = cd.getData('text/html');
-    if (!html) return void document.execCommand('insertText', false, cd.getData('text/plain'));
-    // 网页 / 文档里复制来的内容：只保留笔记支持的格式
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    let out = MD.toHtml(MD.fromHtml(doc.body), noteSrc);
-    const single = /^<div>([\s\S]*)<\/div>$/.exec(out);
-    if (single && !single[1].includes('<div>')) out = single[1]; // 单行内容就地插入，不另起一行
-    document.execCommand('insertHTML', false, out);
-  });
-  ed.addEventListener('dragover', (e) => {
-    if (e.dataTransfer.types.includes('Files')) e.preventDefault();
-  });
-  ed.addEventListener('drop', (e) => {
-    const files = imageFiles(e.dataTransfer.files);
-    if (!files.length) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const r = document.caretRangeFromPoint?.(e.clientX, e.clientY);
-    if (r) {
-      const sel = getSelection();
-      sel.removeAllRanges();
-      sel.addRange(r);
-    }
-    insertImages(files);
-  });
-  ed.addEventListener('click', (e) => {
-    const a = e.target.closest?.('a');
-    if (!a) return;
-    e.preventDefault();
-    if (e.ctrlKey || e.metaKey) invoke('open_link', { url: a.getAttribute('href') }).catch((err) => toast(tErr(err), true));
-  });
-  ed.addEventListener('mouseover', (e) => {
-    const a = e.target.closest?.('a');
-    if (a) a.title = a.getAttribute('href');
-  });
-  ed.addEventListener('dblclick', (e) => {
-    const src = e.target.nodeName === 'IMG' && e.target.dataset.src;
-    if (src) invoke('open_note_image', { rel: src }).catch((err) => toast(tErr(err), true));
+  NoteEditor.attach(els.noteEditor, {
+    session: () => card,
+    ensureKey: ensureCardKey,
+    changed: () => {
+      card.dirty = card.touched = true;
+      scheduleNoteSave(card);
+    },
+    toast,
+    fold: true,
   });
   els.noteClose.addEventListener('click', () => setCardFull(false));
-  // 点卡片以外的地方收起（捕获阶段先收起，再让这次点击照常生效）
+  els.notePop.addEventListener('click', popOutCard);
+  // 点卡片以外的地方收起（捕获阶段先收起，再让这次点击照常生效）；
+  // 卡片附属的浮层（提示、代码块工具条、看图）标了 keep-card，不算「以外」
   document.addEventListener(
     'click',
     (e) => {
       if (!card || card.full) return;
       const row = els.list.querySelector('.row.expanded');
-      if (e.composedPath().some((n) => n === row || n === els.toast)) return;
+      if (e.composedPath().some((n) => n === row || n === els.toast || n.classList?.contains('keep-card'))) return;
       closeCard();
     },
     true,
@@ -1343,6 +1222,10 @@ if (!invoke) {
       .catch(() => {});
   }
   refresh().catch((e) => toast(tErr(e), true));
+  // 独立笔记窗口保存后：刷新列表里的「有笔记」标记
+  window.__TAURI__?.event?.listen('note-saved', () => {
+    noteQueue = noteQueue.then(refresh).catch(() => {});
+  });
   // 进行中时长每 30 秒刷新一次，只改文字，不打断编辑/拖拽
   setInterval(() => {
     for (const tag of els.list.querySelectorAll('.doing-tag')) {
