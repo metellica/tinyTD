@@ -17,6 +17,7 @@ Grab the installer for your platform from the [Releases](https://github.com/mete
 | Action | How |
 | --- | --- |
 | Add a task | Type in the top input box, press `Enter` |
+| Projects | Optional: put `+project` anywhere in the text (e.g. `Book hotel +JapanTrip`). Once any task has one, a filter bar (All / +Work / +JapanTrip …) appears under the input box; the selected filter is remembered. While filtering, new tasks without a `+project` are added to the current one. Click a task's `+project` to filter by it. `+1`, `+5%`, `C++` and the like are not projects |
 | Start / pause | Click the circle at the start of the row: ○ to do → ◉ in progress (highlighted, pinned to the top, live timer) → ⏸ paused (time accumulates) → click again to resume; pausing within 1 minute counts as a misclick and returns it to a plain to-do |
 | Complete | `Shift` + click the circle; the task moves to "Done" with the actual time spent. Hold `Shift` while hovering the circle to preview ✓ |
 | Edit / notes | Click a task (anywhere except the circle and row buttons) to expand it in place into a card: edit the title directly (`Enter` jumps to the notes, the modified time is recorded) and write notes below it: rich text, paste or drop screenshots, auto-saved. `⤢` switches to full screen. Click outside or press `Esc` to collapse. Only one card is open at a time; tasks with notes show a faint `≡` mark |
@@ -24,7 +25,7 @@ Grab the installer for your platform from the [Releases](https://github.com/mete
 | Delete | Click `✕` at the end of the row, then click again to confirm |
 | Reorder | Drag the `⠿` handle; drop on empty space to move to the end |
 | Restore | Click `↩` in the Done list |
-| Clear done | "Clear" at the top right (asks for confirmation) |
+| Clear done | "Clear" at the top right (asks for confirmation); while filtering by a project, only that project's completed tasks are cleared |
 | Show / hide | Global hotkey (default `Ctrl+K`, configurable in Settings) or a click on the tray icon; launching the app again just brings up the running window (single instance) |
 | Settings | ⚙ at the top right: global hotkey, close-button behavior (minimize to taskbar / hide to tray / quit; default is minimize), expand notes on pause / resume, light / dark / follow system, 中文 / English, font and font size |
 | Quit | Depends on the close-button setting; right-click the tray icon → "Quit" always works |
@@ -58,6 +59,7 @@ todo.txt:
 2026-11-25T16:20 Refactor login module doing:2026-11-27T10:30 spent:45
 2026-11-25T16:30 Tidy up meeting notes spent:20
 2026-11-25T16:40 Hook up payment callback spent:130 note:mi2x8k0a
+2026-11-26T09:10 Book hotel +JapanTrip
 
 done.txt:
 x 2026-11-25T20:15 2026-11-25T16:09 Write weekly report spent:75 mod:2026-11-25T17:40
@@ -74,6 +76,7 @@ Waiting on Zhang for the /refund API doc, branch **feat/pay-cb**
 - On completion the running session is added to `spent:`, so the time shown in Done excludes paused time; restoring a task clears both
 - `note:` links the task to its notes file; the note supports a Markdown subset (`#` headings, `-` / `1.` lists, bold, italic, strikethrough, code, links, images), other formatting is dropped
 - Completed lines start with `x <completed time>`, following the todo.txt convention
+- `+project` is the todo.txt project marker: a whitespace-separated word starting with `+` followed by a letter (CJK included). It stays in the text; the list shows it in small text under the title
 - One gotcha: avoid ending a task's text with something shaped exactly like `mod:<timestamp>`, `doing:<timestamp>`, `spent:<number>` or `note:<id>`, since it would be parsed as a marker
 
 ## Build from source
@@ -150,7 +153,7 @@ Observed on the same machine: an unsigned exe can write to `D:\` but every write
 
 ## Design choices
 
-- **Not included**: reminders / notifications, priorities, tags, due dates. In fast-paced work you need a place to jot something down in two seconds, not yet another planner.
-- **Included**: instant input, drag-to-reorder, edit timestamps, a reviewable and restorable done list, and plain text you can move anywhere.
+- **Not included**: reminders / notifications, priorities, due dates, or a project manager (no project settings, colors or nesting). In fast-paced work you need a place to jot something down in two seconds, not yet another planner.
+- **Included**: instant input, drag-to-reorder, edit timestamps, a reviewable and restorable done list, optional todo.txt `+project` markers to separate work / life / a trip without adding a step to input, and plain text you can move anywhere.
 
 License: MIT

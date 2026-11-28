@@ -1,10 +1,13 @@
 // tinyTD 前端 · 无框架原生 JS
 const invoke = window.__TAURI__?.core?.invoke;
 
+const FILTER_KEY = 'tinytd.filter';
 const state = {
   tab: 'todo', // 'todo' | 'done'
   tasks: [],
   done: [],
+  filter: localStorage.getItem(FILTER_KEY) || '', // 只看某个 +项目；'' 为全部
+  loaded: false,
   confirmKey: '',
   confirmTimer: 0,
 };
@@ -26,6 +29,7 @@ const els = {
   countDone: $('count-done'),
   clear: $('btn-clear'),
   add: $('input-add'),
+  projects: $('projects'),
   list: $('list'),
   stats: $('stats'),
   dir: $('btn-dir'),
@@ -131,6 +135,93 @@ function metaLine(t, withCompleted) {
   return parts.join(' · ');
 }
 
+/* ---------- +项目 ---------- */
+
+// 与后端 projects_of 一致：以 + 开头、紧跟一个字母（含中文）的词
+const isProjectWord = (w) => /^\+\p{Alphabetic}/u.test(w);
+const inFilter = (list) => (state.filter ? list.filter((t) => t.projects.includes(state.filter)) : list);
+
+function allProjects() {
+  const set = new Set();
+  for (const t of state.tasks) t.projects.forEach((p) => set.add(p));
+  for (const t of state.done) t.projects.forEach((p) => set.add(p));
+  return [...set].sort((a, b) => a.localeCompare(b, currentLang === 'en' ? 'en' : 'zh-CN'));
+}
+
+// 列表里显示的标题：去掉 +项目 标记（改为在下方小字显示）；只有标记时原样显示
+function displayText(t) {
+  if (!t.projects.length) return t.text;
+  const words = t.text.split(/\s+/).filter((w) => !(w.startsWith('+') && t.projects.includes(w.slice(1))));
+  return words.join(' ') || t.text;
+}
+
+function setFilter(p) {
+  if (state.filter === p) return;
+  closeCard();
+  state.filter = p;
+  try {
+    localStorage.setItem(FILTER_KEY, p);
+  } catch {}
+  resetClear();
+  render();
+}
+
+// 筛选条：有 +项目 时才出现
+function renderProjects(projects) {
+  const bar = els.projects;
+  bar.hidden = projects.length === 0;
+  bar.replaceChildren();
+  els.add.placeholder = state.filter ? tr('addToProject', state.filter) : tr('addPlaceholder');
+  els.clear.title = state.filter ? tr('clearTitleProject', state.filter) : tr('clearTitle');
+  if (bar.hidden) return;
+  const source = state.tab === 'todo' ? state.tasks : state.done;
+  const chip = (value, label, n) => {
+    const b = document.createElement('button');
+    b.className = state.filter === value ? 'chip active' : 'chip';
+    const name = document.createElement('span');
+    name.textContent = label;
+    b.appendChild(name);
+    if (n) {
+      const c = document.createElement('span');
+      c.className = 'count';
+      c.textContent = n;
+      b.appendChild(c);
+    }
+    b.addEventListener('click', () => setFilter(value));
+    return b;
+  };
+  bar.appendChild(chip('', tr('allProjects'), 0));
+  for (const p of projects) bar.appendChild(chip(p, `+${p}`, source.filter((t) => t.projects.includes(p)).length));
+  bar.querySelector('.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+// 竖向滚轮横向滚动筛选条
+els.projects.addEventListener('wheel', (e) => {
+  if (!e.deltaY || e.deltaX) return;
+  e.preventDefault();
+  els.projects.scrollLeft += e.deltaY;
+}, { passive: false });
+
+// 任务下方小字里的 +项目：点击只看该项目（当前筛选的项目不重复显示）
+function projectTags(t) {
+  const ps = t.projects.filter((p) => p !== state.filter);
+  if (!ps.length) return null;
+  const wrap = document.createElement('span');
+  wrap.className = 'projs';
+  for (const p of ps) {
+    const tag = document.createElement('span');
+    tag.className = 'proj';
+    tag.textContent = `+${p}`;
+    tag.title = tr('filterProject');
+    tag.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setFilter(p);
+    });
+    wrap.appendChild(tag);
+  }
+  return wrap;
+}
+
 let toastTimer = 0;
 function toast(msg, isErr = false) {
   els.toast.textContent = msg;
@@ -144,6 +235,7 @@ async function refresh() {
   const [tasks, done] = await Promise.all([invoke('list_tasks'), invoke('list_done')]);
   state.tasks = tasks;
   state.done = done;
+  state.loaded = true;
   reconcileCard();
   render();
 }
@@ -172,18 +264,30 @@ function render() {
 function renderList() {
   const before = flipNext ? rowTops() : null;
   flipNext = false;
+  const projects = allProjects();
+  // 该项目的任务都没了：回到全部（数据加载前不判断）
+  if (state.loaded && state.filter && !projects.includes(state.filter)) {
+    state.filter = '';
+    try {
+      localStorage.removeItem(FILTER_KEY);
+    } catch {}
+  }
+  renderProjects(projects);
+  const tasks = inFilter(state.tasks);
+  const done = inFilter(state.done);
   const groups = Object.fromEntries(GROUPS.map((g) => [g, []]));
-  for (const t of state.tasks) groups[statusOf(t)].push(t);
-  els.countTodo.textContent = state.tasks.length;
-  els.countDone.textContent = state.done.length;
+  for (const t of tasks) groups[statusOf(t)].push(t);
+  els.countTodo.textContent = tasks.length;
+  els.countDone.textContent = done.length;
   els.clear.hidden = state.tab !== 'done';
-  els.stats.textContent = tr('stats', state.tasks.length, state.done.length, groups.doing.length, groups.paused.length);
+  els.stats.textContent = tr('stats', tasks.length, done.length, groups.doing.length, groups.paused.length);
   els.list.replaceChildren();
-  const items = state.tab === 'todo' ? state.tasks : state.done;
+  const items = state.tab === 'todo' ? tasks : done;
   if (items.length === 0) {
+    const f = state.filter;
     els.list.appendChild(state.tab === 'todo'
-      ? emptyEl('sun', tr('emptyTodo'))
-      : emptyEl('inbox', tr('emptyDone')));
+      ? emptyEl('sun', f ? tr('emptyTodoProject', f) : tr('emptyTodo'))
+      : emptyEl('inbox', f ? tr('emptyDoneProject', f) : tr('emptyDone')));
     return;
   }
   if (state.tab === 'done') {
@@ -264,23 +368,26 @@ function deleteBtn(scope, t) {
 function metaEl(t, withCompleted) {
   const meta = document.createElement('div');
   meta.className = 'meta';
-  const line = metaLine(t, withCompleted);
+  const parts = [];
+  const projs = projectTags(t);
+  if (projs) parts.push(projs);
   const status = withCompleted ? 'todo' : statusOf(t);
-  if (status === 'todo') {
-    meta.textContent = line;
-    return meta;
+  if (status !== 'todo') {
+    const tag = document.createElement('span');
+    if (status === 'doing') {
+      tag.className = 'doing-tag';
+      tag.dataset.started = t.doing;
+      tag.dataset.spent = t.spent || 0;
+      tag.textContent = doingLabel(t.doing, t.spent);
+    } else {
+      tag.className = 'paused-tag';
+      tag.textContent = `${tr('pausedNow')} · ${tr('spentTotal')} ${durText(t.spent * 60000)}`;
+    }
+    parts.push(tag);
   }
-  const tag = document.createElement('span');
-  if (status === 'doing') {
-    tag.className = 'doing-tag';
-    tag.dataset.started = t.doing;
-    tag.dataset.spent = t.spent || 0;
-    tag.textContent = doingLabel(t.doing, t.spent);
-  } else {
-    tag.className = 'paused-tag';
-    tag.textContent = `${tr('pausedNow')} · ${tr('spentTotal')} ${durText(t.spent * 60000)}`;
-  }
-  meta.append(tag, line ? ` · ${line}` : '');
+  const line = metaLine(t, withCompleted);
+  if (line) parts.push(line);
+  parts.forEach((p, i) => meta.append(i ? ' · ' : '', p));
   return meta;
 }
 
@@ -314,7 +421,7 @@ function cardParts(row, body) {
 function onRowClick(row, scope, t) {
   row.addEventListener('click', (e) => {
     if (row.classList.contains('expanded')) return;
-    if (e.composedPath().some((n) => n.matches?.('.check, .handle, .act'))) return;
+    if (e.composedPath().some((n) => n.matches?.('.check, .handle, .act, .proj'))) return;
     const onText = e.composedPath().some((n) => n.matches?.('.text'));
     openCard(scope, t, { focus: onText && scope === 'todo' ? 'title' : 'note' });
   });
@@ -372,7 +479,7 @@ function renderTask(t) {
   } else {
     const text = document.createElement('div');
     text.className = 'text';
-    text.textContent = t.text;
+    text.textContent = displayText(t);
     text.title = tr('clickEdit');
     body.appendChild(text);
   }
@@ -431,7 +538,7 @@ function renderDone(t) {
   body.className = 'body';
   const text = document.createElement('div');
   text.className = 'text done';
-  text.textContent = t.text;
+  text.textContent = displayText(t);
   if (!open) text.title = tr('clickNote');
   body.appendChild(text);
   body.appendChild(metaEl(t, true));
@@ -503,10 +610,16 @@ els.tabDone.addEventListener('click', () => setTab('done'));
 
 els.add.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
-    const value = els.add.value.trim();
+    let value = els.add.value.trim();
     if (!value) return;
+    // 筛选某个项目时，没写 +项目 的新任务自动归到该项目
+    const typed = value.split(/\s+/).filter(isProjectWord).map((w) => w.slice(1));
+    const f = state.filter;
+    if (f && !typed.length) value += ` +${f}`;
     tryRun(() => invoke('add_task', { text: value })).then((r) => {
-      if (r) els.add.value = '';
+      if (!r) return;
+      els.add.value = '';
+      if (f && typed.length && !typed.includes(f)) toast(tr('addedTo', typed[0]));
     });
   } else if (e.key === 'Escape') {
     els.add.value = '';
@@ -522,15 +635,16 @@ function resetClear() {
   els.clear.classList.remove('confirm');
 }
 els.clear.addEventListener('click', () => {
-  if (state.done.length === 0) return;
+  const f = state.filter;
+  if (inFilter(state.done).length === 0) return;
   if (!clearArmed) {
     clearArmed = true;
-    els.clear.textContent = tr('clearConfirm');
+    els.clear.textContent = f ? tr('clearConfirmProject', f) : tr('clearConfirm');
     els.clear.classList.add('confirm');
     clearTimer = setTimeout(resetClear, 2600);
   } else {
     resetClear();
-    tryRun(() => invoke('clear_done'), tr('clearedDone'));
+    tryRun(() => invoke('clear_done', { project: f || null }), f ? tr('clearedProject', f) : tr('clearedDone'));
   }
 });
 
@@ -840,11 +954,11 @@ function autoOpenCard(t, from, to) {
   else if (from === 'paused' && fresh.has_note) openCard('todo', fresh, { focus: 'none' });
 }
 
-// 列表刷新后核对卡片对应的任务（行号可能已变）；找不到就收起
+// 列表刷新后核对卡片对应的任务（行号可能已变）；找不到、或已不在当前筛选里就收起
 function reconcileCard() {
   if (!card) return;
   const t = findTask(card.scope, card);
-  if (!t) {
+  if (!t || (state.filter && !t.projects.includes(state.filter))) {
     const c = card;
     saveNote(c, true);
     card = null;

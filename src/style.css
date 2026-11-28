@@ -159,6 +159,36 @@ header { display: flex; align-items: center; gap: 8px; padding: 14px 14px 0; }
 #input-add::placeholder { color: var(--muted); }
 #input-add:focus { border-color: var(--accent); background: var(--bg); }
 
+/* ---------- +项目 筛选条 ---------- */
+
+.projects { display: flex; gap: 4px; padding: 0 14px 8px; overflow-x: auto; scrollbar-width: none; flex: none; }
+.projects[hidden] { display: none; }
+.projects::-webkit-scrollbar { display: none; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--sub);
+  font-size: calc(var(--fs) - 1px);
+  white-space: nowrap;
+  cursor: pointer;
+  flex: none;
+  transition: color 0.15s, background 0.15s;
+}
+.chip:hover { color: var(--text); background: var(--surface-2); }
+.chip.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.chip.active .count { color: var(--accent); opacity: 0.75; }
+
+.projs { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.proj { color: var(--accent); opacity: 0.8; cursor: pointer; }
+.proj:hover { opacity: 1; text-decoration: underline; }
+
 /* ---------- 列表 ---------- */
 
 #list { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 8px; outline: none; }

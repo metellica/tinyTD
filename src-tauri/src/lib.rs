@@ -157,6 +157,8 @@ pub struct Task {
     pub note: Option<String>,
     /// 笔记正文非空（主界面据此显示小标记）
     pub has_note: bool,
+    /// 正文里的 `+项目` 标记（不含 `+`）
+    pub projects: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -170,6 +172,20 @@ pub struct DoneTask {
     pub spent: Option<u32>,
     pub note: Option<String>,
     pub has_note: bool,
+    pub projects: Vec<String>,
+}
+
+/// todo.txt 的项目标记：空白分隔、以 `+` 开头、紧跟一个字母（含中文）的词，如 `+工作`、`+japan2026`
+/// `+1`、`+5%`、`C++` 这类不算；重复的只取一次，保持出现顺序
+fn projects_of(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for word in text.split_whitespace() {
+        let Some(p) = word.strip_prefix('+') else { continue };
+        if p.chars().next().is_some_and(char::is_alphabetic) && !out.iter().any(|x| x == p) {
+            out.push(p.to_string());
+        }
+    }
+    out
 }
 
 type R<T> = Result<T, String>;
@@ -387,6 +403,7 @@ fn load_tasks(dir: &Path) -> Vec<Task> {
             let l = parse_active_line(line);
             Task {
                 id,
+                projects: projects_of(&l.text),
                 text: l.text,
                 created: l.created.unwrap_or_default(),
                 modified: l.modified,
@@ -412,6 +429,7 @@ fn load_done(dir: &Path) -> Vec<DoneTask> {
             }
             DoneTask {
                 id,
+                projects: projects_of(&l.text),
                 text: l.text,
                 created: l.created.unwrap_or_default(),
                 completed: completed.unwrap_or_default(),
@@ -584,6 +602,7 @@ fn add_task(state: State<AppData>, text: String) -> R<Task> {
     let id = read_lines(&state.dir.join(TODO_FILE)).len().saturating_sub(1);
     Ok(Task {
         id,
+        projects: projects_of(&text),
         text,
         created,
         modified: None,
@@ -720,16 +739,28 @@ fn delete_done(state: State<AppData>, id: usize) -> R<()> {
     Ok(())
 }
 
+/// 清空已完成；给了 `project` 时只清掉带该项目标记的
 #[tauri::command]
-fn clear_done(state: State<AppData>) -> R<()> {
+fn clear_done(state: State<AppData>, project: Option<String>) -> R<()> {
     let _g = guard(&state)?;
     let path = state.dir.join(DONE_FILE);
-    let lines = read_lines(&path);
-    write_lines(&path, &[])?;
-    for key in lines.iter().filter_map(|l| note_of_line(l, true)) {
+    let (removed, kept) = split_by_project(read_lines(&path), project.as_deref());
+    write_lines(&path, &kept)?;
+    for key in removed.iter().filter_map(|l| note_of_line(l, true)) {
         remove_note(&state.dir, &key);
     }
     Ok(())
+}
+
+/// 把已完成行分成 (要清掉的, 保留的)；`project` 为空时全部清掉
+fn split_by_project(lines: Vec<String>, project: Option<&str>) -> (Vec<String>, Vec<String>) {
+    match project {
+        None => (lines, Vec::new()),
+        Some(p) => lines.into_iter().partition(|line| {
+            let text = parse_active_line(&split_done_line(line).1).text;
+            projects_of(&text).iter().any(|x| x == p)
+        }),
+    }
 }
 
 /// 在行列表里定位任务：先看 `id` 这一行，对不上（行序已变）再按创建时间 + 文本查找
@@ -1232,6 +1263,31 @@ mod tests {
         let l = parse_active_line("2026-11-25 修复 mod:xxx 的解析 bug");
         assert_eq!(l.text, "修复 mod:xxx 的解析 bug");
         assert_eq!(l.modified, None);
+    }
+
+    #[test]
+    fn project_markers() {
+        assert_eq!(projects_of("订酒店 +日本旅行 +work +日本旅行"), ["日本旅行", "work"]);
+        assert_eq!(projects_of("+生活 买牛奶"), ["生活"]);
+        // 数字、符号、词中间的 + 都不算
+        assert!(projects_of("学 C++ 加班 +1 涨幅 +5% a+b + ++x").is_empty());
+        // 项目标记是正文的一部分，行尾标记照常解析
+        let l = parse_active_line("2026-11-25T16:09 订机票 +旅行 spent:5");
+        assert_eq!((l.text.as_str(), l.spent), ("订机票 +旅行", Some(5)));
+    }
+
+    #[test]
+    fn clear_done_by_project() {
+        let lines = vec![
+            "x 2026-11-26T10:00 2026-11-25T16:09 订机票 +旅行".to_string(),
+            "x 2026-11-26T11:00 2026-11-25T16:10 写周报 +工作 note:abcd1234".to_string(),
+            "x 2026-11-26T12:00 2026-11-25T16:11 +旅行2 换汇".to_string(),
+        ];
+        let (removed, kept) = split_by_project(lines.clone(), Some("旅行"));
+        assert_eq!(removed, [lines[0].clone()]);
+        assert_eq!(kept, [lines[1].clone(), lines[2].clone()]);
+        let (removed, kept) = split_by_project(lines.clone(), None);
+        assert_eq!((removed.len(), kept.len()), (3, 0));
     }
 
     #[test]
