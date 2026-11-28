@@ -64,6 +64,7 @@ const ICONS = {
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   notes: '<path d="M6 7h12M6 12h12M6 17h7"/>',
   expand: '<path d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5"/>',
+  collapse: '<path d="M6 15l6-6 6 6"/>',
   inbox: '<path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5.5 5h13L21 13v5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18v-5z"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
 };
@@ -400,7 +401,7 @@ function noteMark() {
   return mark;
 }
 
-// 卡片底部：笔记编辑区（编辑器节点在渲染后挂进来）+ 全屏按钮
+// 卡片底部：笔记编辑区（编辑器节点在渲染后挂进来）+ 全屏、收起按钮
 function cardParts(row, body) {
   const host = document.createElement('div');
   host.className = 'card-note';
@@ -415,6 +416,9 @@ function cardParts(row, body) {
   const full = actionBtn(tr('fullscreen'), 'expand');
   full.addEventListener('click', () => setCardFull(true));
   row.appendChild(full);
+  const fold = actionBtn(tr('collapse'), 'collapse');
+  fold.addEventListener('click', () => closeCard());
+  row.appendChild(fold);
 }
 
 // 单击条目（圆圈、把手、行尾按钮以外）展开卡片；点在标题上则直接编辑标题

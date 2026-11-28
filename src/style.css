@@ -732,6 +732,10 @@ select option { background: var(--bg); color: var(--text); }
 .row.expanded .handle { margin-top: calc((var(--fs) + 1px) * 0.8 - 10px); }
 .row.expanded .act { margin-top: calc((var(--fs) + 1px) * 0.8 - 11px); }
 .row.expanded .doing-bar { top: 14px; bottom: auto; height: 16px; }
+/* 删除与收起拉开距离，免得误点 */
+.row.expanded .act.danger { margin-left: 6px; }
+/* 卡片展开时列表底部留白：总有一块空白可点来收起 */
+#list:has(.row.expanded) { padding-bottom: 48px; scroll-padding-bottom: 48px; }
 .edit.title { font-weight: 500; }
 
 .card-note {
