@@ -6,6 +6,15 @@
 
 A minimal task notepad for fast-paced AI workflows: open it, type, press Enter. No reminders or scheduling, just quick capture, quick cleanup and easy review.
 
+## Who it's for
+
+- ✅ **Good fit**: jotting down what to do while you work on one main computer, clearing it when done, looking back now and then. Tasks are short-lived, usually for today or this week.
+- ✅ **Good fit**: people who like plain text and want their data fully in their own hands, editable with any editor or script.
+- ❌ **Not a fit**: you need a mobile app, live sync across computers used at the same time, or team collaboration and task assignment.
+- ❌ **Not a fit**: long-term planning with reminders, due dates or scheduling.
+
+tinyTD has no built-in sync, no account and no server. If you really want to switch between several computers, read [Multiple computers](#multiple-computers) first.
+
 ## Download
 
 Grab the installer for your platform from the [Releases](https://github.com/metellica/tinyTD/releases) page: Windows `.exe`, macOS `.dmg`, Linux `.deb` / `.AppImage`.
@@ -33,7 +42,7 @@ Grab the installer for your platform from the [Releases](https://github.com/mete
 
 - 🕒 **Timestamps**: every task records its created time and last-modified time, plus a completed time when done, shown in small text under the task.
 - 🌗 **Light / dark**: follows the system theme by default, or pick one in Settings.
-- 📄 **Plain-text storage**: your data is two todo.txt-style text files. Edit them in Notepad, sync them via cloud storage, track them in git, or search them with grep.
+- 📄 **Plain-text storage**: your data is two todo.txt-style text files. Edit them in Notepad, keep history in git, or search them with grep; backing up or moving is just copying the folder.
 
 ## Data format
 
@@ -50,8 +59,10 @@ It contains:
 - `settings.json`: UI settings (maintained by the settings panel)
 - `notes/<id>.md`: task notes in Markdown (the line carries `note:<id>`); images live in `notes/<id>/`. Deleting a task or clearing Done removes its notes too
 
-> For a portable setup or syncing (cloud drive / git), set the `TINYTD_DATA_DIR` environment variable to point the data directory at any folder, for example:
+> For a portable setup, or to keep the data somewhere else (a cloud drive folder, a git repo), set the `TINYTD_DATA_DIR` environment variable to point the data directory at any folder, for example:
 > `$env:TINYTD_DATA_DIR = 'D:\sync\tinytd'`
+>
+> Before using it across computers, read [Multiple computers](#multiple-computers).
 
 ```text
 todo.txt:
@@ -79,6 +90,16 @@ Waiting on Zhang for the /refund API doc, branch **feat/pay-cb**
 - Completed lines start with `x <completed time>`, following the todo.txt convention
 - `+project` is the todo.txt project marker: a whitespace-separated word starting with `+` followed by a letter (CJK included). It stays in the text; the list shows it in small text under the title
 - One gotcha: avoid ending a task's text with something shaped exactly like `mod:<timestamp>`, `doing:<timestamp>`, `spent:<number>` or `note:<id>`, since it would be parsed as a marker
+
+### Multiple computers
+
+tinyTD is designed for use on one computer and has no built-in sync. Putting the data directory in a cloud drive or a git repo lets you carry the data between computers, but the app itself is not aware of syncing, so keep in mind:
+
+- **Run tinyTD on only one computer at a time.** Before switching, quit it on the first computer (right-click the tray icon → "Quit") and wait for the cloud drive to finish syncing or for your git push.
+- While running, the app **does not pick up external changes** (synced from the cloud drive, or made in Notepad); restart it to see them. Acting on a stale list may change the wrong task.
+- If two computers change the files at the same time, the cloud drive may create conflict copies or simply overwrite; tinyTD will not merge them for you.
+- With a cloud drive, set the data folder to "Always keep on this device". If the files are on-demand placeholders or locked by the sync client, reads may fail and, in the worst case, data can be lost.
+- With git, todo.txt has one task per line, so line-based merges work well and you keep history; images in `notes/` will make the repo grow over time.
 
 ## Build from source
 
@@ -149,7 +170,7 @@ Observed on the same machine: an unsigned exe can write to `D:\` but every write
    ```
 
    Launching and saving data work normally afterwards.
-3. To keep the data directory out of AppData entirely (portable / synced), redirect it with the environment variable, but the WebView2 folder from option 2 still has to be pre-created:
+3. To keep the data directory out of AppData entirely (portable / in a cloud drive folder), redirect it with the environment variable, but the WebView2 folder from option 2 still has to be pre-created:
 
    ```powershell
    $env:TINYTD_DATA_DIR = 'D:\sync\tinytd'
@@ -158,6 +179,6 @@ Observed on the same machine: an unsigned exe can write to `D:\` but every write
 ## Design choices
 
 - **Not included**: reminders / notifications, priorities, due dates, or a project manager (no project settings, colors or nesting). In fast-paced work you need a place to jot something down in two seconds, not yet another planner.
-- **Included**: instant input, drag-to-reorder, edit timestamps, a reviewable and restorable done list, optional todo.txt `+project` markers to separate work / life / a trip without adding a step to input, and plain text you can move anywhere.
+- **No sync**: no account, no server, no mobile app. It's a work notepad for one computer and the data is local text files; to move between computers, use a cloud drive or git, see [Multiple computers](#multiple-computers).- **Included**: instant input, drag-to-reorder, edit timestamps, a reviewable and restorable done list, optional todo.txt `+project` markers to separate work / life / a trip without adding a step to input, and plain text you can move anywhere.
 
 License: MIT
