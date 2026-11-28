@@ -1229,7 +1229,13 @@ pub fn run() {
                         show_main(tray.app_handle());
                     }
                 });
-            let tray = tray.icon(tauri::include_image!("icons/32x32.png")).build(app)?;
+            #[cfg(target_os = "macos")]
+            let tray = tray
+                .icon(tauri::include_image!("icons/tray-template.png"))
+                .icon_as_template(true);
+            #[cfg(not(target_os = "macos"))]
+            let tray = tray.icon(tauri::include_image!("icons/tray.png"));
+            let tray = tray.build(app)?;
             // 持有托盘句柄，避免被提前 drop 导致图标消失
             app.manage(tray);
             app.manage(TrayItems { show, quit });
